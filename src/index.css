@@ -1,0 +1,86 @@
+:root {
+  --paper: #f3ecdf;
+  --paper-deep: #e4d8c3;
+  --ink: #102022;
+  --ink-subtle: #536568;
+  --accent: #14494c;
+  --accent-soft: rgba(20, 73, 76, 0.12);
+  --line: rgba(20, 73, 76, 0.14);
+  --shadow: 0 18px 48px rgba(9, 35, 39, 0.12);
+  --sans: 'Avenir Next', 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --serif: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(20, 73, 76, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(178, 134, 65, 0.12), transparent 24%),
+    linear-gradient(180deg, #fbf7ef, #efe5d3);
+  font: 16px/1.5 var(--sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+}
+
+body,
+button,
+input,
+textarea {
+  font-family: var(--sans);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-weight: 700;
+  line-height: 1.05;
+}
+
+h1 {
+  font-size: clamp(2.4rem, 5vw, 4.35rem);
+}
+
+h2 {
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+}
+
+h3 {
+  font-size: 1.2rem;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+#root {
+  width: 100%;
+}
