@@ -1,18 +1,17 @@
 .workspace {
   min-height: 100svh;
-  padding: 24px;
   box-sizing: border-box;
 }
 
 .workspace__grid {
   display: grid;
-  grid-template-columns: var(--sessions-sidebar-width, 280px) minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
-  min-height: calc(100svh - 48px);
+  min-height: 100svh;
 }
 
 .workspace__grid--sidebar-closed {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .panel {
@@ -28,17 +27,13 @@
   overflow: hidden;
 }
 
-.panel--sessions,
 .panel--assistant {
   padding: 20px;
 }
 
-.panel--sessions {
-  position: relative;
-}
-
 .panel--canvas {
   padding: 18px;
+  min-width: 0;
 }
 
 .panel__section {
@@ -188,38 +183,167 @@
   display: none;
 }
 
-.session-list {
+.workspace-rail {
   display: flex;
   flex-direction: column;
+  gap: 18px;
+  padding: 18px 12px;
+  height: 100svh;
+  border: 1px solid rgba(20, 73, 76, 0.12);
+  border-left: none;
+  border-top: none;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.94), rgba(244, 239, 226, 0.92)),
+    var(--paper);
+  box-shadow: 0 12px 28px rgba(7, 33, 36, 0.06);
+  overflow: visible;
+  width: 100%;
+  transition:
+    padding 180ms ease;
+}
+
+.workspace-rail.is-open {
+  padding-inline: 16px;
+}
+
+.workspace-rail__top {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.sidebar-resizer {
-  position: absolute;
-  top: 18px;
-  right: -11px;
-  width: 18px;
-  height: calc(100% - 36px);
-  cursor: col-resize;
-  touch-action: none;
-  z-index: 4;
+.workspace-rail__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
 }
 
-.sidebar-resizer::before {
-  content: '';
-  position: absolute;
-  inset: 0 7px;
-  border-radius: 999px;
-  background: rgba(20, 73, 76, 0.12);
+.workspace-rail__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.workspace-rail__content-header h2 {
+  margin-top: 6px;
+}
+
+.rail-button {
+  width: 100%;
+  min-height: 48px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--ink-subtle);
+  cursor: pointer;
   transition:
     background 160ms ease,
+    color 160ms ease,
     transform 160ms ease;
 }
 
-.sidebar-resizer:hover::before,
-.sidebar-resizer.is-active::before {
-  background: rgba(20, 73, 76, 0.28);
-  transform: scaleX(1.15);
+.workspace-rail:not(.is-open) .rail-button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-6px);
+  opacity: 0;
+  pointer-events: none;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(10, 14, 18, 0.96);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  z-index: 10;
+}
+
+.workspace-rail:not(.is-open) .rail-button:hover::after,
+.workspace-rail:not(.is-open) .rail-button:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.rail-button:hover,
+.rail-button.is-active {
+  background: rgba(20, 73, 76, 0.1);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.rail-button--logo {
+  min-height: 56px;
+}
+
+.workspace-rail:not(.is-open) .rail-button {
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  justify-content: center;
+  padding: 0;
+}
+
+.workspace-rail:not(.is-open) .rail-button--logo {
+  width: 48px;
+}
+
+.rail-button__icon {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rail-button__icon--logo {
+  width: 24px;
+  height: 24px;
+}
+
+.rail-button__label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.rail-button__label--brand {
+  font-family: var(--serif);
+  font-size: 1.22rem;
+  font-weight: 700;
+}
+
+.session-list,
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.sidebar-drawer__copy {
+  margin-bottom: 8px;
 }
 
 .session-card {
@@ -264,6 +388,31 @@
   text-transform: capitalize;
   color: var(--accent);
   font-size: 0.82rem;
+}
+
+.document-card {
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 252, 244, 0.74);
+  border: 1px solid rgba(20, 73, 76, 0.12);
+}
+
+.document-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.document-card__title .rail-button__icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.document-card p {
+  color: var(--ink-subtle);
+  font-size: 0.92rem;
 }
 
 .chip-list {
@@ -712,13 +861,13 @@
 
 @media (max-width: 1200px) {
   .workspace__grid {
-    grid-template-columns: var(--sessions-sidebar-width, 250px) minmax(0, 1fr);
+    grid-template-columns: 288px minmax(0, 1fr);
   }
 }
 
 @media (max-width: 980px) {
   .workspace {
-    padding: 16px;
+    min-height: auto;
   }
 
   .canvas-header,
@@ -736,19 +885,37 @@
     grid-template-columns: 1fr;
   }
 
-  .panel--sessions,
+  .workspace-rail,
   .panel--assistant,
   .panel--canvas {
     min-height: auto;
   }
 
+  .workspace-rail {
+    padding: 12px 14px;
+    width: auto;
+    height: auto;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+
+  .workspace-rail.is-open {
+    width: auto;
+  }
+
+  .workspace-rail__top,
+  .workspace-rail__actions {
+    width: 100%;
+  }
+
+  .workspace-rail__actions {
+    flex-direction: row;
+  }
+
   .session-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .sidebar-resizer {
-    display: none;
   }
 
   .canvas-metrics {
@@ -762,7 +929,6 @@
 }
 
 @media (max-width: 640px) {
-  .panel--sessions,
   .panel--assistant,
   .panel--canvas {
     padding: 14px;

@@ -1,12 +1,10 @@
 import {
   useEffect,
-  useRef,
   useState,
   useTransition,
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import ReactFlow, {
   Background,
@@ -41,19 +39,35 @@ import type {
 } from './types'
 
 const STORAGE_KEY = 'hcai-enhanced-prototype-state'
-const SESSIONS_SIDEBAR_MIN_WIDTH = 240
-const SESSIONS_SIDEBAR_MAX_WIDTH = 420
+type WorkspaceSidebarView = 'sessions' | 'documents'
 
-function clampSidebarWidth(width: number) {
-  return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, width))
+function WorkspaceLogoIcon() {
+  return (
+    <svg aria-hidden="true" className="rail-button__icon rail-button__icon--logo" viewBox="0 0 20 20">
+      <circle cx="10" cy="10" r="7.25" />
+      <path d="M10 2.75V17.25" />
+      <path d="M2.75 10H17.25" />
+    </svg>
+  )
 }
 
-function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+function SessionsIcon() {
   return (
-    <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
-      <rect x="2.5" y="3" width="15" height="14" rx="3" />
-      <path d="M7.25 3.75V16.25" />
-      {collapsed ? <path d="M10.5 10H14.25M12.5 8L14.5 10L12.5 12" /> : <path d="M14.25 10H10.5M12.25 8L10.25 10L12.25 12" />}
+    <svg aria-hidden="true" className="rail-button__icon" viewBox="0 0 20 20">
+      <rect x="3" y="3.5" width="14" height="4" rx="2" />
+      <rect x="3" y="8.75" width="14" height="3.25" rx="1.625" />
+      <rect x="3" y="13.25" width="14" height="3.25" rx="1.625" />
+    </svg>
+  )
+}
+
+function DocumentsIcon() {
+  return (
+    <svg aria-hidden="true" className="rail-button__icon" viewBox="0 0 20 20">
+      <path d="M6.25 2.75H11.75L15.25 6.25V16.25C15.25 16.8023 14.8023 17.25 14.25 17.25H6.25C5.69772 17.25 5.25 16.8023 5.25 16.25V3.75C5.25 3.19772 5.69772 2.75 6.25 2.75Z" />
+      <path d="M11.5 2.75V6.5H15.25" />
+      <path d="M7.5 9.5H12.75" />
+      <path d="M7.5 12H12.75" />
     </svg>
   )
 }
@@ -514,12 +528,10 @@ function App() {
   const [sessionDraft, setSessionDraft] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
-  const [isSessionsSidebarOpen, setIsSessionsSidebarOpen] = useState(true)
-  const [sessionsSidebarWidth, setSessionsSidebarWidth] = useState(280)
-  const [isResizingSessionsSidebar, setIsResizingSessionsSidebar] = useState(false)
+  const [isWorkspaceSidebarOpen, setIsWorkspaceSidebarOpen] = useState(true)
+  const [workspaceSidebarView, setWorkspaceSidebarView] = useState<WorkspaceSidebarView>('sessions')
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
   const [, startTransition] = useTransition()
-  const sessionsSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0]
   const selectedNode =
@@ -530,43 +542,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, activeSessionId }))
   }, [sessions, activeSessionId])
-
-  useEffect(() => {
-    if (!isResizingSessionsSidebar) {
-      return
-    }
-
-    function handlePointerMove(event: PointerEvent) {
-      const resizeSession = sessionsSidebarResizeRef.current
-
-      if (!resizeSession) {
-        return
-      }
-
-      const nextWidth = clampSidebarWidth(
-        resizeSession.startWidth + (event.clientX - resizeSession.startX),
-      )
-
-      setSessionsSidebarWidth(nextWidth)
-    }
-
-    function handlePointerUp() {
-      sessionsSidebarResizeRef.current = null
-      setIsResizingSessionsSidebar(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-  }, [isResizingSessionsSidebar])
 
   function updateSession(sessionId: string, updater: (session: StudySession) => StudySession) {
     setSessions((currentSessions) =>
@@ -600,25 +575,22 @@ function App() {
     })
   }
 
-  function handleToggleSessionsSidebar() {
-    setIsSessionsSidebarOpen((currentValue) => !currentValue)
+  function handleWorkspaceSidebarAction(nextView: WorkspaceSidebarView) {
+    if (isWorkspaceSidebarOpen && workspaceSidebarView === nextView) {
+      setIsWorkspaceSidebarOpen(false)
+      return
+    }
+
+    setWorkspaceSidebarView(nextView)
+    setIsWorkspaceSidebarOpen(true)
+  }
+
+  function handleToggleWorkspaceSidebar() {
+    setIsWorkspaceSidebarOpen((currentValue) => !currentValue)
   }
 
   function handleToggleAssistant() {
     setIsAssistantOpen((currentValue) => !currentValue)
-  }
-
-  function handleSessionsSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
-    event.preventDefault()
-
-    sessionsSidebarResizeRef.current = {
-      startX: event.clientX,
-      startWidth: sessionsSidebarWidth,
-    }
-
-    setIsResizingSessionsSidebar(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
   }
 
   function handleToggleMode(nextMode: CanvasMode) {
@@ -866,86 +838,133 @@ function App() {
   return (
     <ReactFlowProvider>
       <div className="workspace">
-        <div
-          className={`workspace__grid ${!isSessionsSidebarOpen ? 'workspace__grid--sidebar-closed' : ''}`}
-          style={{ '--sessions-sidebar-width': `${sessionsSidebarWidth}px` } as React.CSSProperties}
-        >
-          {isSessionsSidebarOpen ? (
-            <aside className="panel panel--sessions">
-              <div className="panel__section">
-                <p className="eyebrow">Sessions</p>
-                <h2>Study topics</h2>
-                <p className="panel__copy">
-                  Keep different ML topics separate so each session preserves its own canvas, chat,
-                  and follow-up questions.
-                </p>
-              </div>
+        <div className={`workspace__grid ${!isWorkspaceSidebarOpen ? 'workspace__grid--sidebar-closed' : ''}`}>
+          <aside className={`workspace-rail ${isWorkspaceSidebarOpen ? 'is-open' : ''}`}>
+            <div className="workspace-rail__top">
+              <button
+                className="rail-button rail-button--logo"
+                type="button"
+                aria-label={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                data-tooltip={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                onClick={handleToggleWorkspaceSidebar}
+              >
+                <WorkspaceLogoIcon />
+                {isWorkspaceSidebarOpen ? <span className="rail-button__label rail-button__label--brand">Workspace</span> : null}
+              </button>
+            </div>
 
-              <form className="session-form" onSubmit={handleCreateSession}>
-                <input
-                  className="text-input"
-                  value={sessionDraft}
-                  onChange={(event) => setSessionDraft(event.target.value)}
-                  placeholder="Create a new session"
-                />
-                <button className="action-button action-button--primary" type="submit">
-                  New session
-                </button>
-              </form>
+            <div className="workspace-rail__actions">
+              <button
+                aria-label="Show sessions"
+                data-tooltip="Sessions"
+                className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'sessions' ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => handleWorkspaceSidebarAction('sessions')}
+              >
+                <SessionsIcon />
+                {isWorkspaceSidebarOpen ? <span className="rail-button__label">Sessions</span> : null}
+              </button>
+              <button
+                aria-label="Show uploaded documents"
+                data-tooltip="Documents"
+                className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'documents' ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => handleWorkspaceSidebarAction('documents')}
+              >
+                <DocumentsIcon />
+                {isWorkspaceSidebarOpen ? <span className="rail-button__label">Documents</span> : null}
+              </button>
+            </div>
 
-              <div className="session-list">
-                {sessions.map((session) => {
-                  const isActive = session.id === activeSessionId
-                  return (
-                    <button
-                      key={session.id}
-                      className={`session-card ${isActive ? 'is-active' : ''}`}
-                      type="button"
-                      onClick={() => handleSwitchSession(session.id)}
-                    >
-                      <div className="session-card__title-row">
-                        <strong>{session.title}</strong>
-                        <span>{session.canvas.mode}</span>
-                      </div>
-                      <p>
-                        {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges
-                      </p>
-                      <p>
-                        {session.chatHistory.length} messages, {session.uploadedDocuments.length}{' '}
-                        materials
-                      </p>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="panel__section panel__section--documents">
-                <div className="panel__heading-row">
-                  <h3>Materials</h3>
-                  <label className="upload-button">
-                    Upload
-                    <input type="file" multiple onChange={handleUploadMaterials} />
-                  </label>
+            {isWorkspaceSidebarOpen ? (
+              <div className="workspace-rail__content">
+                <div className="workspace-rail__content-header">
+                  <p className="eyebrow">
+                    {workspaceSidebarView === 'sessions' ? 'Sessions' : 'Uploaded Documents'}
+                  </p>
+                  <h2>{workspaceSidebarView === 'sessions' ? 'Study topics' : activeSession.title}</h2>
                 </div>
 
-                <div className="chip-list">
-                  {activeSession.uploadedDocuments.map((documentName) => (
-                    <span className="chip" key={documentName}>
-                      {documentName}
-                    </span>
-                  ))}
-                </div>
-              </div>
+                {workspaceSidebarView === 'sessions' ? (
+                  <>
+                    <p className="panel__copy sidebar-drawer__copy">
+                      Switch between study topics without taking over the canvas.
+                    </p>
 
-              <div
-                aria-label="Resize sessions sidebar"
-                aria-orientation="vertical"
-                className={`sidebar-resizer ${isResizingSessionsSidebar ? 'is-active' : ''}`}
-                onPointerDown={handleSessionsSidebarResizeStart}
-                role="separator"
-              />
-            </aside>
-          ) : null}
+                    <form className="session-form" onSubmit={handleCreateSession}>
+                      <input
+                        className="text-input"
+                        value={sessionDraft}
+                        onChange={(event) => setSessionDraft(event.target.value)}
+                        placeholder="Create a new session"
+                      />
+                      <button className="action-button action-button--primary" type="submit">
+                        New session
+                      </button>
+                    </form>
+
+                    <div className="session-list">
+                      {sessions.map((session) => {
+                        const isActive = session.id === activeSessionId
+                        return (
+                          <button
+                            key={session.id}
+                            className={`session-card ${isActive ? 'is-active' : ''}`}
+                            type="button"
+                            onClick={() => handleSwitchSession(session.id)}
+                          >
+                            <div className="session-card__title-row">
+                              <strong>{session.title}</strong>
+                              <span>{session.canvas.mode}</span>
+                            </div>
+                            <p>
+                              {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges
+                            </p>
+                            <p>
+                              {session.chatHistory.length} messages, {session.uploadedDocuments.length}{' '}
+                              materials
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="panel__heading-row">
+                      <h3>Materials</h3>
+                      <label className="upload-button">
+                        Upload
+                        <input type="file" multiple onChange={handleUploadMaterials} />
+                      </label>
+                    </div>
+
+                    <p className="panel__copy sidebar-drawer__copy">
+                      Uploaded references stay here so the session list stays compact.
+                    </p>
+
+                    <div className="document-list">
+                      {activeSession.uploadedDocuments.map((documentName) => (
+                        <article className="document-card" key={documentName}>
+                          <div className="document-card__title">
+                            <DocumentsIcon />
+                            <strong>{documentName}</strong>
+                          </div>
+                          <p>Attached to {activeSession.title}</p>
+                        </article>
+                      ))}
+
+                      {!activeSession.uploadedDocuments.length ? (
+                        <p className="panel__copy">
+                          No uploaded materials yet. Add lecture notes, screenshots, or handouts here.
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </aside>
 
           <main className="panel panel--canvas">
             <div className="canvas-header">
@@ -955,15 +974,6 @@ function App() {
               </div>
 
               <div className="canvas-header__actions">
-                <button
-                  aria-label={isSessionsSidebarOpen ? 'Hide sessions sidebar' : 'Show sessions sidebar'}
-                  className="action-button icon-button"
-                  type="button"
-                  onClick={handleToggleSessionsSidebar}
-                >
-                  <SidebarToggleIcon collapsed={!isSessionsSidebarOpen} />
-                  <span>{isSessionsSidebarOpen ? 'Hide sessions' : 'Show sessions'}</span>
-                </button>
                 <div className="mode-toggle">
                   <button
                     className={activeSession.canvas.mode === 'view' ? 'is-active' : ''}
