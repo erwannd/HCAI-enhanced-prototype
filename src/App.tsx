@@ -17,6 +17,7 @@ import ReactFlow, {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  reconnectEdge,
   type Connection,
   type EdgeChange,
   type NodeChange,
@@ -538,6 +539,10 @@ function App() {
     activeSession?.canvas.nodes.find((node) => node.id === selectedNodeId) ??
     activeSession?.canvas.nodes.find((node) => node.selected) ??
     null
+  const selectedEdge =
+    activeSession?.canvas.edges.find((edge) => edge.id === selectedEdgeId) ??
+    activeSession?.canvas.edges.find((edge) => edge.selected) ??
+    null
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, activeSessionId }))
@@ -662,6 +667,21 @@ function App() {
     }))
   }
 
+  function handleReconnect(oldEdge: StudyCanvasEdge, connection: Connection) {
+    if (activeSession.canvas.mode !== 'edit' || !connection.source || !connection.target) {
+      return
+    }
+
+    updateActiveSession((session) => ({
+      ...session,
+      canvas: {
+        ...session.canvas,
+        revision: session.canvas.revision + 1,
+        edges: reconnectEdge(oldEdge, connection, session.canvas.edges),
+      },
+    }))
+  }
+
   function handleQuickAdd(kind: StudyNodeKind) {
     const nodeCount = activeSession.canvas.nodes.length
     const x = 70 + (nodeCount % 3) * 280
@@ -731,6 +751,28 @@ function App() {
                 },
               }
             : node,
+        ),
+      },
+    }))
+  }
+
+  function updateSelectedEdgeField(field: 'label' | 'source' | 'target', value: string) {
+    if (!selectedEdge) {
+      return
+    }
+
+    updateActiveSession((session) => ({
+      ...session,
+      canvas: {
+        ...session.canvas,
+        revision: session.canvas.revision + 1,
+        edges: session.canvas.edges.map((edge) =>
+          edge.id === selectedEdge.id
+            ? {
+                ...edge,
+                [field]: value,
+              }
+            : edge,
         ),
       },
     }))
@@ -1043,9 +1085,12 @@ function App() {
                   onNodesChange={handleNodesChange}
                   onEdgesChange={handleEdgesChange}
                   onConnect={handleConnect}
+                  onReconnect={handleReconnect}
                   onSelectionChange={handleSelectionChange}
                   nodesDraggable={activeSession.canvas.mode === 'edit'}
                   nodesConnectable={activeSession.canvas.mode === 'edit'}
+                  edgesUpdatable={activeSession.canvas.mode === 'edit'}
+                  reconnectRadius={24}
                   elementsSelectable
                 >
                   <Background
@@ -1069,10 +1114,20 @@ function App() {
               <div className="inspector__header">
                 <div>
                   <p className="eyebrow">Inspector</p>
-                  <h3>{selectedNode ? selectedNode.data.title : 'Select a node'}</h3>
+                  <h3>
+                    {selectedNode
+                      ? selectedNode.data.title
+                      : selectedEdge
+                        ? typeof selectedEdge.label === 'string' && selectedEdge.label
+                          ? selectedEdge.label
+                          : 'Selected edge'
+                        : 'Select a node or edge'}
+                  </h3>
                 </div>
                 {selectedNode ? (
                   <span className="chip chip--muted">{kindLabels[selectedNode.data.kind]}</span>
+                ) : selectedEdge ? (
+                  <span className="chip chip--muted">Edge</span>
                 ) : null}
               </div>
 
@@ -1098,10 +1153,56 @@ function App() {
                     />
                   </label>
                 </div>
+              ) : selectedEdge ? (
+                <div className="inspector__form">
+                  <label>
+                    Edge Label
+                    <input
+                      className="text-input"
+                      disabled={activeSession.canvas.mode !== 'edit'}
+                      value={typeof selectedEdge.label === 'string' ? selectedEdge.label : ''}
+                      onChange={(event) => updateSelectedEdgeField('label', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    From Node
+                    <select
+                      className="text-input"
+                      disabled={activeSession.canvas.mode !== 'edit'}
+                      value={selectedEdge.source}
+                      onChange={(event) => updateSelectedEdgeField('source', event.target.value)}
+                    >
+                      {activeSession.canvas.nodes.map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {node.data.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    To Node
+                    <select
+                      className="text-input"
+                      disabled={activeSession.canvas.mode !== 'edit'}
+                      value={selectedEdge.target}
+                      onChange={(event) => updateSelectedEdgeField('target', event.target.value)}
+                    >
+                      {activeSession.canvas.nodes.map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {node.data.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="panel__copy">
+                    Drag either endpoint of a selected edge on the canvas to reconnect it to a
+                    different side or node.
+                  </p>
+                </div>
               ) : (
                 <p className="panel__copy">
-                  Select a node to edit its title and note content. In View Mode the inspector stays
-                  readable, but fields are locked.
+                  Select a node to edit its content, or select an edge to rename it and change where
+                  it connects. In View Mode the inspector stays readable, but fields are locked.
                 </p>
               )}
             </section>

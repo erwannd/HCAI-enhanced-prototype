@@ -9,6 +9,13 @@ const kindDescriptions = {
   question: 'Open question',
 }
 
+const handlePositions = [
+  { id: 'top', position: Position.Top },
+  { id: 'right', position: Position.Right },
+  { id: 'bottom', position: Position.Bottom },
+  { id: 'left', position: Position.Left },
+]
+
 export function CanvasNodeCard({ data, selected }: NodeProps<CanvasNodeData>) {
   const mode = useCanvasMode()
 
@@ -30,10 +37,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasNodeData>) {
 
       {mode === 'edit' ? (
         <>
-          <Handle className="canvas-node__handle" position={Position.Top} type="target" />
-          <Handle className="canvas-node__handle" position={Position.Right} type="source" />
-          <Handle className="canvas-node__handle" position={Position.Bottom} type="source" />
-          <Handle className="canvas-node__handle" position={Position.Left} type="target" />
+          {handlePositions.map((handle) => (
+            <Handle
+              key={handle.id}
+              className="canvas-node__handle"
+              id={handle.id}
+              isConnectableEnd
+              isConnectableStart
+              position={handle.position}
+              type="source"
+            />
+          ))}
         </>
       ) : null}
 
