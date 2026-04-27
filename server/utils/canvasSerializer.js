@@ -8,6 +8,21 @@ function normalizeNodeType(value) {
   return 'concept';
 }
 
+function normalizeNumber(value, fallback = null) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
 function serializeCanvasNode(node) {
   const nodeID = String(node.nodeID || node.id || '').trim();
 
@@ -22,6 +37,16 @@ function serializeCanvasNode(node) {
     nodeType: normalizeNodeType(node.nodeType || data.kind || data.nodeType || node.type),
     title: String(node.title || data.title || '').trim(),
     text: String(node.text || data.text || data.description || '').trim(),
+    x: normalizeNumber(node.x ?? node.position?.x, 0),
+    y: normalizeNumber(node.y ?? node.position?.y, 0),
+    width: normalizeNumber(
+      node.width ?? node.data?.width ?? node.style?.width ?? node.measured?.width,
+      null,
+    ),
+    height: normalizeNumber(
+      node.height ?? node.data?.height ?? node.style?.height ?? node.measured?.height,
+      null,
+    ),
   };
 }
 
@@ -39,6 +64,8 @@ function serializeCanvasEdge(edge) {
     sourceNodeID,
     targetNodeID,
     label: String(edge.label || edge.data?.label || '').trim(),
+    sourceHandle: edge.sourceHandle ? String(edge.sourceHandle) : null,
+    targetHandle: edge.targetHandle ? String(edge.targetHandle) : null,
   };
 }
 
@@ -50,6 +77,34 @@ function serializeCanvasState(input = {}) {
   const edges = rawEdges.map(serializeCanvasEdge).filter(Boolean);
 
   return { nodes, edges };
+}
+
+function projectCanvasNodeForPrompt(node) {
+  return {
+    nodeID: node.nodeID,
+    nodeType: normalizeNodeType(node.nodeType),
+    title: String(node.title || '').trim(),
+    text: String(node.text || '').trim(),
+  };
+}
+
+function projectCanvasEdgeForPrompt(edge) {
+  return {
+    edgeID: edge.edgeID,
+    sourceNodeID: edge.sourceNodeID,
+    targetNodeID: edge.targetNodeID,
+    label: String(edge.label || '').trim(),
+  };
+}
+
+function projectCanvasStateForPrompt(input = {}) {
+  const serialized = serializeCanvasState(input);
+
+  return {
+    revision: normalizeNumber(input.revision, 0) || 0,
+    nodes: serialized.nodes.map(projectCanvasNodeForPrompt),
+    edges: serialized.edges.map(projectCanvasEdgeForPrompt),
+  };
 }
 
 function formatCanvasForPrompt(canvasState) {
@@ -73,6 +128,9 @@ function formatCanvasForPrompt(canvasState) {
 }
 
 module.exports = {
+  projectCanvasEdgeForPrompt,
+  projectCanvasNodeForPrompt,
+  projectCanvasStateForPrompt,
   serializeCanvasEdge,
   serializeCanvasNode,
   serializeCanvasState,

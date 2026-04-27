@@ -14,7 +14,7 @@ These models are draft backend schemas for the enhanced prototype. They are writ
 
 ## Important modeling rule
 
-The `CanvasState` and `canvasContextSnapshot` intentionally store only semantic content:
+`canvasContextSnapshot` intentionally stores only semantic content:
 
 - node IDs
 - node types
@@ -23,7 +23,7 @@ The `CanvasState` and `canvasContextSnapshot` intentionally store only semantic 
 - edge source/target relationships
 - edge labels
 
-They should **not** store frontend-only details such as:
+It should **not** store frontend-only details such as:
 
 - x/y coordinates
 - pixel sizes
@@ -31,4 +31,11 @@ They should **not** store frontend-only details such as:
 - handle IDs
 - styling
 
-That separation makes prompt construction cleaner and keeps backend state independent from React Flow internals.
+`CanvasState` is slightly different:
+
+- it stores the semantic content above
+- it also stores layout data needed to restore the visual map, such as node coordinates, node dimensions, and edge handle attachments
+
+That means the database can restore the exact frontend layout, while prompt construction can still strip the state back down to semantic content only.
+
+That separation keeps prompt construction cleaner while still preserving the learner's visual arrangement in storage.

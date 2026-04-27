@@ -14,16 +14,27 @@ This folder is a backend scaffold for the enhanced HCAI prototype. It is intenti
 
 ## Important design choice
 
-The backend stores only the **semantic** canvas state in MongoDB:
+The backend stores a **layout-rich** canvas state in MongoDB so the app can restore the exact map:
 
 - node IDs
 - node types
 - node titles / text
+- node coordinates
+- node dimensions
 - edge IDs
 - edge source / target IDs
 - edge labels
+- edge source / target handles
 
-It does **not** store coordinates, dimensions, or React Flow-specific UI details in `CanvasState`.
+However, the chat prompt does **not** use the full stored object. Before prompting the model, the backend projects the canvas down to semantic content only:
+
+- node IDs
+- node types
+- node titles / text
+- edge source / target relationships
+- edge labels
+
+That split keeps LLM context clean while still preserving the frontend layout in the database.
 
 ## Suggested next integration step
 

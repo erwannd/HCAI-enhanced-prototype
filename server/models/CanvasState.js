@@ -16,6 +16,13 @@ const CanvasNodeSchema = new Schema(
 
     title: { type: String, default: '' },
     text: { type: String, default: '' },
+
+    // Layout fields are stored so the exact visual canvas can be restored.
+    // These fields are intentionally excluded from LLM prompt construction.
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 },
+    width: { type: Number, default: null },
+    height: { type: Number, default: null },
   },
   { _id: false },
 );
@@ -26,6 +33,11 @@ const CanvasEdgeSchema = new Schema(
     sourceNodeID: { type: String, required: true },
     targetNodeID: { type: String, required: true },
     label: { type: String, default: '' },
+
+    // React Flow stores which handle on a node was used for the connection.
+    // Keeping these values lets the app restore which side the edge attaches to.
+    sourceHandle: { type: String, default: null },
+    targetHandle: { type: String, default: null },
   },
   { _id: false },
 );
@@ -61,7 +73,8 @@ const CanvasStateSchema = new Schema(
     },
 
     // Keep only semantic content here.
-    // Coordinates, selected state, handle IDs, and styling belong in the frontend layer.
+    // The backend persists semantic data plus layout fields needed to restore the map.
+    // UI-only flags such as selected state or transient hover state should still stay frontend-only.
     nodes: {
       type: [CanvasNodeSchema],
       default: [],

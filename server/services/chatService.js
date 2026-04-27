@@ -4,7 +4,7 @@ const CanvasState = require('../models/CanvasState');
 const Interaction = require('../models/Interaction');
 const confidenceCalculator = require('./confidenceCalculator');
 const retrievalService = require('./retrievalService');
-const { formatCanvasForPrompt, serializeCanvasState } = require('../utils/canvasSerializer');
+const { formatCanvasForPrompt, projectCanvasStateForPrompt } = require('../utils/canvasSerializer');
 
 class ChatService {
   constructor() {
@@ -45,11 +45,8 @@ class ChatService {
       };
     }
 
-    // Re-serialize the state so only semantic data reaches the prompt.
-    return {
-      revision: canvasState.revision || 0,
-      ...serializeCanvasState(canvasState),
-    };
+    // Project the stored layout-rich canvas into a semantic-only prompt view.
+    return projectCanvasStateForPrompt(canvasState);
   }
 
   async createChatTurn(session, userInput, options = {}) {
