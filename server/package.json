@@ -1,0 +1,21 @@
+{
+  "name": "hcai-enhanced-prototype-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "mongoose": "^8.19.3",
+    "multer": "^2.0.2",
+    "natural": "^8.1.0",
+    "openai": "^6.9.1",
+    "pdf-parse": "^1.1.1"
+  }
+}
