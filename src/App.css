@@ -6,7 +6,7 @@
 .workspace__grid {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  gap: 16px;
+  gap: 10px;
   min-height: 100svh;
 }
 
@@ -32,8 +32,13 @@
 }
 
 .panel--canvas {
-  padding: 18px;
+  padding: 18px 18px 18px 8px;
   min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
 
 .panel__section {
