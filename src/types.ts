@@ -3,6 +3,7 @@ import type { Edge, Node, XYPosition } from 'reactflow'
 
 export type StudyNodeKind = 'concept' | 'note' | 'example' | 'question'
 export type CanvasMode = 'view' | 'edit'
+export type SystemId = 'baseline' | 'enhanced'
 
 export type CanvasNodeData = {
   kind: StudyNodeKind
@@ -54,6 +55,7 @@ export type CanvasSuggestion = {
 export type StudySession = {
   id: string
   participantId: string
+  systemId: SystemId
   title: string
   uploadedDocuments: string[]
   canvas: CanvasState

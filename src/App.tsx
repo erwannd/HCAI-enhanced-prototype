@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   useTransition,
   type ChangeEvent,
@@ -25,6 +26,14 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import './App.css'
+import {
+  bootstrapParticipant,
+  createBackendSession,
+  hydrateSession,
+  saveCanvasState,
+  sendChatMessage,
+  uploadDocument,
+} from './api'
 import { CanvasNodeCard } from './components/CanvasNode'
 import { MessageContent } from './components/MessageContent'
 import { CanvasModeContext } from './canvas-mode'
@@ -39,7 +48,9 @@ import type {
   StudySession,
 } from './types'
 
-const STORAGE_KEY = 'hcai-enhanced-prototype-state'
+const PARTICIPANT_STORAGE_KEY = 'hcai-enhanced-prototype-participant-id'
+const ACTIVE_SESSION_STORAGE_KEY = 'hcai-enhanced-prototype-active-session-id'
+
 type WorkspaceSidebarView = 'sessions' | 'documents'
 
 function WorkspaceLogoIcon() {
@@ -154,6 +165,8 @@ function createNode(
     id: createId('node'),
     type: 'study',
     position: { x, y },
+    width: 250,
+    height: 166,
     style: { width: 250, height: 166 },
     data: { kind, title, text },
   }
@@ -176,177 +189,129 @@ function createEdge(
   }
 }
 
-function createStarterSession(title: string): StudySession {
+function normalizeErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return 'Something went wrong while talking to the backend.'
+}
+
+function resolveParticipantId() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const fromQuery = params.get('participantID')?.trim() || params.get('participantId')?.trim()
+
+  if (fromQuery) {
+    window.localStorage.setItem(PARTICIPANT_STORAGE_KEY, fromQuery)
+    return fromQuery
+  }
+
+  const fromStorage = window.localStorage.getItem(PARTICIPANT_STORAGE_KEY)?.trim()
+  if (fromStorage) {
+    return fromStorage
+  }
+
+  const prompted = window.prompt('Enter your participant ID')?.trim()
+  if (prompted) {
+    window.localStorage.setItem(PARTICIPANT_STORAGE_KEY, prompted)
+    return prompted
+  }
+
+  return null
+}
+
+function getStoredActiveSessionId() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  return window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY)
+}
+
+function storeActiveSessionId(sessionId: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId)
+}
+
+function getDefaultFollowUpQuestions(title: string, latestQuestion = '') {
+  const fingerprint = `${title} ${latestQuestion}`.toLowerCase()
+
+  if (fingerprint.includes('cluster')) {
+    return [
+      'What is the difference between clustering and classification?',
+      'Why do centroids move during k-means?',
+      'How should I choose the number of clusters?',
+    ]
+  }
+
+  if (fingerprint.includes('regress')) {
+    return [
+      'What does a coefficient mean in linear regression?',
+      'Why are residuals useful?',
+      'How is regression different from correlation?',
+    ]
+  }
+
+  return [
+    'What is variance in simple terms?',
+    'How is PCA different from feature selection?',
+    'Can you walk me through a small 2D example?',
+  ]
+}
+
+function createWelcomeMessage(title: string) {
   const normalized = title.toLowerCase()
 
   if (normalized.includes('cluster')) {
-    const clustering = createNode('concept', 360, 180, 'Clustering', 'Grouping data points that behave similarly.')
-    const centroid = createNode('concept', 90, 70, 'Centroids', 'Representative centers used to update each cluster.')
-    const distance = createNode('concept', 650, 80, 'Distance Metric', 'A rule for deciding how similar two points are.')
-    const assignment = createNode('example', 650, 320, 'Assignment Step', 'Each point joins the nearest centroid before the centers move again.')
-
-    return {
-      id: createId('session'),
-      participantId: 'demo-user',
-      title: 'Clustering',
-      uploadedDocuments: ['week-4-clustering-slides.pdf'],
-      canvas: {
-        sessionId: createId('canvas'),
-        revision: 3,
-        mode: 'edit',
-        nodes: [clustering, centroid, distance, assignment],
-        edges: [
-          createEdge(centroid.id, clustering.id, 'updates'),
-          createEdge(distance.id, clustering.id, 'defines'),
-          createEdge(clustering.id, assignment.id, 'iterates through', true),
-        ],
-      },
-      chatHistory: [
-        createMessage(
-          'assistant',
-          `### Study partner online
+    return createMessage(
+      'assistant',
+      `### Clustering workspace
 
 Use this space to compare clustering methods, sketch the update loop, and turn loose ideas into a concept map.
 
 - Ask for explanations in plain language.
 - Use **Ask + Map** when you want a reply plus a suggested canvas edit.`,
-        ),
-      ],
-      followUpQuestions: [
-        'What is the difference between clustering and classification?',
-        'Why do centroids move during k-means?',
-        'How should I choose the number of clusters?',
-      ],
-      pendingSuggestions: [],
-    }
+    )
   }
 
   if (normalized.includes('regress')) {
-    const regression = createNode('concept', 360, 190, 'Regression', 'Estimating a target value from one or more input features.')
-    const features = createNode('concept', 80, 90, 'Features', 'Inputs used to predict the target.')
-    const target = createNode('concept', 640, 90, 'Target', 'The quantity the model is trying to predict.')
-    const residuals = createNode('note', 640, 320, 'Residuals', 'The gap between the model prediction and the observed value.')
-
-    return {
-      id: createId('session'),
-      participantId: 'demo-user',
-      title: 'Regression',
-      uploadedDocuments: ['week-5-regression-notes.pdf'],
-      canvas: {
-        sessionId: createId('canvas'),
-        revision: 2,
-        mode: 'edit',
-        nodes: [regression, features, target, residuals],
-        edges: [
-          createEdge(features.id, regression.id, 'feed into'),
-          createEdge(regression.id, target.id, 'predicts'),
-          createEdge(residuals.id, regression.id, 'evaluate'),
-        ],
-      },
-      chatHistory: [
-        createMessage(
-          'assistant',
-          `### Regression workspace
+    return createMessage(
+      'assistant',
+      `### Regression workspace
 
 Use the canvas to separate the model ingredients from the evaluation ideas.
 
 $$
 \\hat{y} = \\beta_0 + \\beta_1 x_1 + \\dots + \\beta_p x_p
 $$`,
-        ),
-      ],
-      followUpQuestions: [
-        'What does a coefficient mean in linear regression?',
-        'Why are residuals useful?',
-        'How is regression different from correlation?',
-      ],
-      pendingSuggestions: [],
-    }
+    )
   }
 
-  const pca = createNode('concept', 350, 180, 'PCA', 'A method that rotates the feature space to capture the largest variation first.')
-  const variance = createNode('concept', 70, 85, 'Variance', 'How spread out the data is along a direction.')
-  const components = createNode('concept', 640, 95, 'Principal Components', 'New axes ordered by how much variation they explain.')
-  const analogy = createNode('note', 640, 320, 'Intuition', 'PCA finds the view that makes the data look most stretched out.')
-
-  return {
-    id: createId('session'),
-    participantId: 'demo-user',
-    title: normalized.includes('pca') ? 'PCA' : title,
-    uploadedDocuments: ['week-3-pca-handout.pdf', 'lecture-snapshot.png'],
-    canvas: {
-      sessionId: createId('canvas'),
-      revision: 4,
-      mode: 'edit',
-      nodes: [pca, variance, components, analogy],
-      edges: [
-        createEdge(variance.id, pca.id, 'measures'),
-        createEdge(pca.id, components.id, 'produces'),
-        createEdge(analogy.id, pca.id, 'helps explain'),
-      ],
-    },
-    chatHistory: [
-      createMessage(
-        'assistant',
-        `### Shared learning workspace
+  return createMessage(
+    'assistant',
+    `### Shared learning workspace
 
 This prototype keeps the chat and concept map side by side so a learner can build understanding instead of scrolling through one long answer.
 
 $$
 \\text{principal component} = \\arg\\max_{\\|w\\|=1} \\mathrm{Var}(Xw)
 $$`,
-      ),
-    ],
-    followUpQuestions: [
-      'What is variance in simple terms?',
-      'How is PCA different from feature selection?',
-      'Can you walk me through a small 2D example?',
-    ],
-    pendingSuggestions: [
-      {
-        id: createId('suggestion'),
-        title: 'Add covariance context',
-        summary: 'Introduce covariance so the map captures why PCA cares about correlated directions.',
-        reason: 'Good next step after defining variance and principal components.',
-        operations: [
-          {
-            type: 'add_node',
-            node: createNode('concept', 80, 330, 'Covariance', 'How two features change together across the dataset.'),
-          },
-        ],
-      },
-    ],
-  }
+  )
 }
 
-function createInitialSessions() {
-  return [createStarterSession('PCA'), createStarterSession('Clustering'), createStarterSession('Regression')]
-}
-
-function loadInitialState() {
-  if (typeof window === 'undefined') {
-    const seeded = createInitialSessions()
-    return { sessions: seeded, activeSessionId: seeded[0].id }
-  }
-
-  const raw = window.localStorage.getItem(STORAGE_KEY)
-
-  if (!raw) {
-    const seeded = createInitialSessions()
-    return { sessions: seeded, activeSessionId: seeded[0].id }
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as { sessions: StudySession[]; activeSessionId: string }
-
-    if (!parsed.sessions?.length) {
-      throw new Error('No sessions found')
-    }
-
-    return parsed
-  } catch {
-    const seeded = createInitialSessions()
-    return { sessions: seeded, activeSessionId: seeded[0].id }
+function buildFrontendSession(session: Omit<StudySession, 'followUpQuestions' | 'pendingSuggestions'>): StudySession {
+  return {
+    ...session,
+    chatHistory: session.chatHistory.length > 0 ? session.chatHistory : [createWelcomeMessage(session.title)],
+    followUpQuestions: getDefaultFollowUpQuestions(session.title),
+    pendingSuggestions: [],
   }
 }
 
@@ -359,7 +324,14 @@ function createSuggestionForQuestion(question: string, session: StudySession): C
   const y = 70 + row * 200
 
   if (lowerQuestion.includes('cluster')) {
-    const node = createNode('example', x, y, 'Cluster Quality', 'Check whether points inside a cluster stay close while clusters stay distinct.')
+    const node = createNode(
+      'example',
+      x,
+      y,
+      'Cluster Quality',
+      'Check whether points inside a cluster stay close while clusters stay distinct.',
+    )
+
     return {
       id: createId('suggestion'),
       title: 'Map cluster quality',
@@ -367,13 +339,20 @@ function createSuggestionForQuestion(question: string, session: StudySession): C
       reason: 'This gives the learner a bridge from algorithm steps to interpretation.',
       operations: [
         { type: 'add_node', node },
-        { type: 'add_edge', edge: createEdge(baseNode.id, node.id, 'evaluate') },
+        ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(baseNode.id, node.id, 'evaluate') }] : []),
       ],
     }
   }
 
   if (lowerQuestion.includes('regress')) {
-    const node = createNode('note', x, y, 'Line of Best Fit', 'A compact intuition: regression finds the line that reduces overall error.')
+    const node = createNode(
+      'note',
+      x,
+      y,
+      'Line of Best Fit',
+      'A compact intuition: regression finds the line that reduces overall error.',
+    )
+
     return {
       id: createId('suggestion'),
       title: 'Add regression intuition',
@@ -381,12 +360,19 @@ function createSuggestionForQuestion(question: string, session: StudySession): C
       reason: 'Beginners often need a bridge between algebra and intuition.',
       operations: [
         { type: 'add_node', node },
-        { type: 'add_edge', edge: createEdge(node.id, baseNode.id, 'explains') },
+        ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(node.id, baseNode.id, 'explains') }] : []),
       ],
     }
   }
 
-  const node = createNode('concept', x, y, 'Explained Variance', 'How much of the original data spread is preserved by a component.')
+  const node = createNode(
+    'concept',
+    x,
+    y,
+    'Explained Variance',
+    'How much of the original data spread is preserved by a component.',
+  )
+
   return {
     id: createId('suggestion'),
     title: 'Extend the PCA map',
@@ -394,80 +380,8 @@ function createSuggestionForQuestion(question: string, session: StudySession): C
     reason: 'This is a natural next concept after introducing PCA.',
     operations: [
       { type: 'add_node', node },
-      { type: 'add_edge', edge: createEdge(node.id, baseNode.id, 'measures') },
+      ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(node.id, baseNode.id, 'measures') }] : []),
     ],
-  }
-}
-
-function generateAssistantTurn(
-  question: string,
-  session: StudySession,
-  withCanvasPlan: boolean,
-): { response: string; followUps: string[]; suggestion?: CanvasSuggestion } {
-  const lowerQuestion = question.toLowerCase()
-
-  if (lowerQuestion.includes('cluster')) {
-    return {
-      response: `### Clustering, in plain language
-
-Clustering tries to place similar points into the same group **without** using a known answer label.
-
-- The algorithm needs a notion of similarity.
-- It repeatedly updates groups and then checks whether the grouping still makes sense.
-- The canvas is useful here because you can separate *algorithm steps*, *assumptions*, and *evaluation*.
-
-$$
-\\mu_k = \\frac{1}{|C_k|}\\sum_{x_i \\in C_k} x_i
-$$`,
-      followUps: [
-        'Why does k-means depend on the distance metric?',
-        'What are centroids actually representing?',
-        'How would I explain clustering to a beginner?',
-      ],
-      suggestion: withCanvasPlan ? createSuggestionForQuestion(question, session) : undefined,
-    }
-  }
-
-  if (lowerQuestion.includes('regress')) {
-    return {
-      response: `### Regression, in plain language
-
-Regression predicts a numeric outcome by learning how features relate to the target.
-
-- Features are the evidence the model can inspect.
-- The target is what you want to estimate.
-- Residuals tell you where the model is still wrong.
-
-$$
-\\hat{y} = \\beta_0 + \\beta_1 x_1 + \\dots + \\beta_p x_p
-$$`,
-      followUps: [
-        'What does each coefficient contribute?',
-        'Why are residuals important?',
-        'When would linear regression fail?',
-      ],
-      suggestion: withCanvasPlan ? createSuggestionForQuestion(question, session) : undefined,
-    }
-  }
-
-  return {
-    response: `### PCA, in plain language
-
-PCA re-expresses the data using new axes that capture the largest variation first.
-
-- **Variance** tells you how much spread exists along a direction.
-- **Principal components** are the new directions the method discovers.
-- The point is not just dimensionality reduction. It is also a cleaner mental model of how structure appears in the data.
-
-$$
-\\text{principal component} = \\arg\\max_{\\|w\\|=1} \\mathrm{Var}(Xw)
-$$`,
-    followUps: [
-      'Why does PCA care about variance?',
-      'How many principal components should I keep?',
-      'What is the role of covariance in PCA?',
-    ],
-    suggestion: withCanvasPlan || lowerQuestion.includes('map') ? createSuggestionForQuestion(question, session) : undefined,
   }
 }
 
@@ -522,9 +436,9 @@ function applyCanvasOperations(
 }
 
 function App() {
-  const initialState = loadInitialState()
-  const [sessions, setSessions] = useState(initialState.sessions)
-  const [activeSessionId, setActiveSessionId] = useState(initialState.activeSessionId)
+  const [participantId, setParticipantId] = useState('')
+  const [sessions, setSessions] = useState<StudySession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState('')
   const [chatInput, setChatInput] = useState('')
   const [sessionDraft, setSessionDraft] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -532,9 +446,16 @@ function App() {
   const [isWorkspaceSidebarOpen, setIsWorkspaceSidebarOpen] = useState(true)
   const [workspaceSidebarView, setWorkspaceSidebarView] = useState<WorkspaceSidebarView>('sessions')
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
+  const [isAppLoading, setIsAppLoading] = useState(true)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const [isUploadingDocuments, setIsUploadingDocuments] = useState(false)
+  const [appError, setAppError] = useState<string | null>(null)
+  const hydratedCanvasRevisionsRef = useRef<Record<string, number>>({})
+  const canvasSaveTimeoutRef = useRef<number | null>(null)
   const [, startTransition] = useTransition()
 
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0]
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
   const selectedNode =
     activeSession?.canvas.nodes.find((node) => node.id === selectedNodeId) ??
     activeSession?.canvas.nodes.find((node) => node.selected) ??
@@ -545,8 +466,115 @@ function App() {
     null
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, activeSessionId }))
-  }, [sessions, activeSessionId])
+    let isCancelled = false
+
+    async function initializeApp() {
+      setIsAppLoading(true)
+      setAppError(null)
+
+      try {
+        const resolvedParticipantId = resolveParticipantId()
+
+        if (!resolvedParticipantId) {
+          throw new Error('A participant ID is required before the enhanced prototype can load.')
+        }
+
+        if (!isCancelled) {
+          setParticipantId(resolvedParticipantId)
+        }
+
+        const bootstrap = await bootstrapParticipant(resolvedParticipantId)
+        const hydratedSessions = await Promise.all(bootstrap.sessions.map(hydrateSession))
+        const frontendSessions = hydratedSessions.map(buildFrontendSession)
+
+        frontendSessions.forEach((session) => {
+          hydratedCanvasRevisionsRef.current[session.id] = session.canvas.revision
+        })
+
+        const storedActiveSessionId = getStoredActiveSessionId()
+        const preferredSessionId =
+          storedActiveSessionId && frontendSessions.some((session) => session.id === storedActiveSessionId)
+            ? storedActiveSessionId
+            : frontendSessions[0]?.id ?? ''
+
+        if (!isCancelled) {
+          setSessions(frontendSessions)
+          setActiveSessionId(preferredSessionId)
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setAppError(normalizeErrorMessage(error))
+          setSessions([])
+          setActiveSessionId('')
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsAppLoading(false)
+        }
+      }
+    }
+
+    void initializeApp()
+
+    return () => {
+      isCancelled = true
+
+      if (canvasSaveTimeoutRef.current !== null) {
+        window.clearTimeout(canvasSaveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeSession || isAppLoading) {
+      return
+    }
+
+    const hydratedRevision = hydratedCanvasRevisionsRef.current[activeSession.id]
+    if (hydratedRevision === activeSession.canvas.revision) {
+      return
+    }
+
+    const sessionId = activeSession.id
+    const revisionToPersist = activeSession.canvas.revision
+    const canvasSnapshot = activeSession.canvas
+
+    if (canvasSaveTimeoutRef.current !== null) {
+      window.clearTimeout(canvasSaveTimeoutRef.current)
+    }
+
+    canvasSaveTimeoutRef.current = window.setTimeout(() => {
+      void saveCanvasState(sessionId, canvasSnapshot)
+        .then((savedCanvas) => {
+          hydratedCanvasRevisionsRef.current[sessionId] = savedCanvas.revision
+
+          if (savedCanvas.revision !== revisionToPersist) {
+            setSessions((currentSessions) =>
+              currentSessions.map((session) =>
+                session.id === sessionId && session.canvas.revision === revisionToPersist
+                  ? {
+                      ...session,
+                      canvas: {
+                        ...session.canvas,
+                        revision: savedCanvas.revision,
+                      },
+                    }
+                  : session,
+              ),
+            )
+          }
+        })
+        .catch((error) => {
+          setAppError(`Could not save the canvas: ${normalizeErrorMessage(error)}`)
+        })
+    }, 350)
+
+    return () => {
+      if (canvasSaveTimeoutRef.current !== null) {
+        window.clearTimeout(canvasSaveTimeoutRef.current)
+      }
+    }
+  }, [activeSession, isAppLoading])
 
   function updateSession(sessionId: string, updater: (session: StudySession) => StudySession) {
     setSessions((currentSessions) =>
@@ -555,6 +583,10 @@ function App() {
   }
 
   function updateActiveSession(updater: (session: StudySession) => StudySession) {
+    if (!activeSessionId) {
+      return
+    }
+
     updateSession(activeSessionId, updater)
   }
 
@@ -563,24 +595,48 @@ function App() {
       setActiveSessionId(sessionId)
       setSelectedNodeId(null)
       setSelectedEdgeId(null)
+      storeActiveSessionId(sessionId)
     })
   }
 
-  function handleCreateSession(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const title = sessionDraft.trim() || `Topic ${sessions.length + 1}`
-    const nextSession = createStarterSession(title)
 
-    startTransition(() => {
-      setSessions((currentSessions) => [...currentSessions, nextSession])
-      setActiveSessionId(nextSession.id)
-      setSessionDraft('')
-      setSelectedNodeId(null)
-      setSelectedEdgeId(null)
-    })
+    if (!participantId || isCreatingSession) {
+      return
+    }
+
+    setIsCreatingSession(true)
+    setAppError(null)
+
+    try {
+      const title = sessionDraft.trim() || `Topic ${sessions.length + 1}`
+      const createdSession = await createBackendSession(participantId, title)
+      const hydratedSession = buildFrontendSession(await hydrateSession(createdSession))
+
+      hydratedCanvasRevisionsRef.current[hydratedSession.id] = hydratedSession.canvas.revision
+
+      startTransition(() => {
+        setSessions((currentSessions) => [hydratedSession, ...currentSessions])
+        setActiveSessionId(hydratedSession.id)
+        setSessionDraft('')
+        setSelectedNodeId(null)
+        setSelectedEdgeId(null)
+        setWorkspaceSidebarView('sessions')
+        storeActiveSessionId(hydratedSession.id)
+      })
+    } catch (error) {
+      setAppError(`Could not create the session: ${normalizeErrorMessage(error)}`)
+    } finally {
+      setIsCreatingSession(false)
+    }
   }
 
   function handleWorkspaceSidebarAction(nextView: WorkspaceSidebarView) {
+    if (nextView === 'documents' && !activeSession) {
+      return
+    }
+
     if (isWorkspaceSidebarOpen && workspaceSidebarView === nextView) {
       setIsWorkspaceSidebarOpen(false)
       return
@@ -599,6 +655,10 @@ function App() {
   }
 
   function handleToggleMode(nextMode: CanvasMode) {
+    if (!activeSessionId) {
+      return
+    }
+
     updateActiveSession((session) => ({
       ...session,
       canvas: {
@@ -609,7 +669,7 @@ function App() {
   }
 
   function handleNodesChange(changes: NodeChange[]) {
-    if (activeSession.canvas.mode !== 'edit') {
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
       return
     }
 
@@ -624,7 +684,7 @@ function App() {
   }
 
   function handleEdgesChange(changes: EdgeChange[]) {
-    if (activeSession.canvas.mode !== 'edit') {
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
       return
     }
 
@@ -644,7 +704,7 @@ function App() {
   }
 
   function handleConnect(connection: Connection) {
-    if (activeSession.canvas.mode !== 'edit' || !connection.source || !connection.target) {
+    if (!activeSession || activeSession.canvas.mode !== 'edit' || !connection.source || !connection.target) {
       return
     }
 
@@ -668,7 +728,7 @@ function App() {
   }
 
   function handleReconnect(oldEdge: StudyCanvasEdge, connection: Connection) {
-    if (activeSession.canvas.mode !== 'edit' || !connection.source || !connection.target) {
+    if (!activeSession || activeSession.canvas.mode !== 'edit' || !connection.source || !connection.target) {
       return
     }
 
@@ -683,6 +743,10 @@ function App() {
   }
 
   function handleQuickAdd(kind: StudyNodeKind) {
+    if (!activeSession) {
+      return
+    }
+
     const nodeCount = activeSession.canvas.nodes.length
     const x = 70 + (nodeCount % 3) * 280
     const y = 70 + Math.floor(nodeCount / 3) * 190
@@ -702,7 +766,7 @@ function App() {
   }
 
   function handleDeleteSelection() {
-    if (!selectedNodeId && !selectedEdgeId) {
+    if (!activeSession || (!selectedNodeId && !selectedEdgeId)) {
       return
     }
 
@@ -741,6 +805,7 @@ function App() {
       ...session,
       canvas: {
         ...session.canvas,
+        revision: session.canvas.revision + 1,
         nodes: session.canvas.nodes.map((node) =>
           node.id === selectedNode.id
             ? {
@@ -778,67 +843,114 @@ function App() {
     }))
   }
 
-  function handleUploadMaterials(event: ChangeEvent<HTMLInputElement>) {
+  async function handleUploadMaterials(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
 
-    if (!files.length) {
+    if (!activeSession || !files.length || isUploadingDocuments) {
       return
     }
 
-    updateActiveSession((session) => ({
-      ...session,
-      uploadedDocuments: Array.from(
-        new Set([...session.uploadedDocuments, ...files.map((file) => file.name)]),
-      ),
-    }))
+    setIsUploadingDocuments(true)
+    setAppError(null)
 
-    event.target.value = ''
+    try {
+      const uploadedFileNames: string[] = []
+
+      for (const file of files) {
+        const response = await uploadDocument(activeSession.id, file)
+        uploadedFileNames.push(response.document.filename)
+      }
+
+      updateSession(activeSession.id, (session) => ({
+        ...session,
+        uploadedDocuments: Array.from(new Set([...session.uploadedDocuments, ...uploadedFileNames])),
+      }))
+    } catch (error) {
+      setAppError(`Could not upload the document: ${normalizeErrorMessage(error)}`)
+    } finally {
+      setIsUploadingDocuments(false)
+    }
   }
 
-  function submitChat(question: string, withCanvasPlan: boolean) {
+  async function submitChat(question: string, withCanvasPlan: boolean) {
+    const session = activeSession
     const trimmedQuestion = question.trim()
 
-    if (!trimmedQuestion) {
+    if (!session || !trimmedQuestion || isSendingMessage) {
       return
     }
 
     const userMessage = createMessage('user', trimmedQuestion)
-    const turn = generateAssistantTurn(trimmedQuestion, activeSession, withCanvasPlan)
-    const assistantMessage = createMessage('assistant', turn.response)
 
-    updateActiveSession((session) => ({
-      ...session,
-      chatHistory: [...session.chatHistory, userMessage, assistantMessage],
-      followUpQuestions: turn.followUps,
-      pendingSuggestions: turn.suggestion
-        ? [turn.suggestion, ...session.pendingSuggestions]
-        : session.pendingSuggestions,
+    updateSession(session.id, (currentSession) => ({
+      ...currentSession,
+      chatHistory: [...currentSession.chatHistory, userMessage],
     }))
 
     setChatInput('')
+    setIsAssistantOpen(true)
+    setIsSendingMessage(true)
+    setAppError(null)
+
+    try {
+      const response = await sendChatMessage(session.id, trimmedQuestion)
+      const assistantMessage = createMessage('assistant', response.botResponse)
+
+      updateSession(session.id, (currentSession) => {
+        const suggestion = withCanvasPlan ? createSuggestionForQuestion(trimmedQuestion, currentSession) : undefined
+
+        return {
+          ...currentSession,
+          chatHistory: [...currentSession.chatHistory, assistantMessage],
+          followUpQuestions: getDefaultFollowUpQuestions(currentSession.title, trimmedQuestion),
+          pendingSuggestions: suggestion
+            ? [suggestion, ...currentSession.pendingSuggestions]
+            : currentSession.pendingSuggestions,
+        }
+      })
+    } catch (error) {
+      const failureMessage = createMessage(
+        'assistant',
+        `I could not get a response from the backend right now.\n\n${normalizeErrorMessage(error)}`,
+      )
+
+      updateSession(session.id, (currentSession) => ({
+        ...currentSession,
+        chatHistory: [...currentSession.chatHistory, failureMessage],
+      }))
+
+      setAppError(`Could not send the message: ${normalizeErrorMessage(error)}`)
+    } finally {
+      setIsSendingMessage(false)
+    }
   }
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    submitChat(chatInput, false)
+    void submitChat(chatInput, false)
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submitChat(chatInput, false)
+      void submitChat(chatInput, false)
     }
   }
 
   function handleAskAndMap() {
-    submitChat(chatInput, true)
+    void submitChat(chatInput, true)
   }
 
   function handleFollowUp(question: string) {
-    submitChat(question, false)
+    void submitChat(question, false)
   }
 
   function handleAcceptSuggestion(suggestionId: string) {
+    if (!activeSession) {
+      return
+    }
+
     const suggestion = activeSession.pendingSuggestions.find((item) => item.id === suggestionId)
 
     if (!suggestion) {
@@ -869,13 +981,19 @@ function App() {
   }
 
   function handleDismissSuggestion(suggestionId: string) {
+    if (!activeSession) {
+      return
+    }
+
     updateActiveSession((session) => ({
       ...session,
       pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
     }))
   }
 
-  const conceptCount = activeSession.canvas.nodes.filter((node) => node.data.kind === 'concept').length
+  const conceptCount = activeSession
+    ? activeSession.canvas.nodes.filter((node) => node.data.kind === 'concept').length
+    : 0
 
   return (
     <ReactFlowProvider>
@@ -911,6 +1029,7 @@ function App() {
                 data-tooltip="Documents"
                 className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'documents' ? 'is-active' : ''}`}
                 type="button"
+                disabled={!activeSession}
                 onClick={() => handleWorkspaceSidebarAction('documents')}
               >
                 <DocumentsIcon />
@@ -924,13 +1043,17 @@ function App() {
                   <p className="eyebrow">
                     {workspaceSidebarView === 'sessions' ? 'Sessions' : 'Uploaded Documents'}
                   </p>
-                  <h2>{workspaceSidebarView === 'sessions' ? 'Study topics' : activeSession.title}</h2>
+                  <h2>{workspaceSidebarView === 'sessions' ? 'Study topics' : activeSession?.title ?? 'No session selected'}</h2>
                 </div>
+
+                {appError ? <p className="panel__copy">{appError}</p> : null}
 
                 {workspaceSidebarView === 'sessions' ? (
                   <>
                     <p className="panel__copy sidebar-drawer__copy">
-                      Switch between study topics without taking over the canvas.
+                      {participantId
+                        ? `Participant ${participantId} can switch between topics without taking over the canvas.`
+                        : 'Switch between study topics without taking over the canvas.'}
                     </p>
 
                     <form className="session-form" onSubmit={handleCreateSession}>
@@ -940,14 +1063,19 @@ function App() {
                         onChange={(event) => setSessionDraft(event.target.value)}
                         placeholder="Create a new session"
                       />
-                      <button className="action-button action-button--primary" type="submit">
-                        New session
+                      <button
+                        className="action-button action-button--primary"
+                        disabled={isCreatingSession || !participantId}
+                        type="submit"
+                      >
+                        {isCreatingSession ? 'Creating…' : 'New session'}
                       </button>
                     </form>
 
                     <div className="session-list">
                       {sessions.map((session) => {
                         const isActive = session.id === activeSessionId
+
                         return (
                           <button
                             key={session.id}
@@ -957,18 +1085,23 @@ function App() {
                           >
                             <div className="session-card__title-row">
                               <strong>{session.title}</strong>
-                              <span>{session.canvas.mode}</span>
+                              <span>{session.systemId}</span>
                             </div>
                             <p>
                               {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges
                             </p>
                             <p>
-                              {session.chatHistory.length} messages, {session.uploadedDocuments.length}{' '}
-                              materials
+                              {session.chatHistory.length} messages, {session.uploadedDocuments.length} materials
                             </p>
                           </button>
                         )
                       })}
+
+                      {!isAppLoading && !sessions.length ? (
+                        <p className="panel__copy">
+                          No study sessions exist yet. Create the first one from the form above.
+                        </p>
+                      ) : null}
                     </div>
                   </>
                 ) : (
@@ -976,8 +1109,8 @@ function App() {
                     <div className="panel__heading-row">
                       <h3>Materials</h3>
                       <label className="upload-button">
-                        Upload
-                        <input type="file" multiple onChange={handleUploadMaterials} />
+                        {isUploadingDocuments ? 'Uploading…' : 'Upload'}
+                        <input type="file" multiple disabled={!activeSession || isUploadingDocuments} onChange={handleUploadMaterials} />
                       </label>
                     </div>
 
@@ -986,7 +1119,7 @@ function App() {
                     </p>
 
                     <div className="document-list">
-                      {activeSession.uploadedDocuments.map((documentName) => (
+                      {activeSession?.uploadedDocuments.map((documentName) => (
                         <article className="document-card" key={documentName}>
                           <div className="document-card__title">
                             <DocumentsIcon />
@@ -996,9 +1129,15 @@ function App() {
                         </article>
                       ))}
 
-                      {!activeSession.uploadedDocuments.length ? (
+                      {activeSession && !activeSession.uploadedDocuments.length ? (
                         <p className="panel__copy">
                           No uploaded materials yet. Add lecture notes, screenshots, or handouts here.
+                        </p>
+                      ) : null}
+
+                      {!activeSession ? (
+                        <p className="panel__copy">
+                          Choose a session first, then upload the documents for that topic here.
                         </p>
                       ) : null}
                     </div>
@@ -1009,208 +1148,235 @@ function App() {
           </aside>
 
           <main className="panel panel--canvas">
-            <div className="canvas-header">
-              <div>
-                <p className="eyebrow">Learning Canvas</p>
-                <h2>{activeSession.title}</h2>
-              </div>
-
-              <div className="canvas-header__actions">
-                <div className="mode-toggle">
-                  <button
-                    className={activeSession.canvas.mode === 'view' ? 'is-active' : ''}
-                    type="button"
-                    onClick={() => handleToggleMode('view')}
-                  >
-                    View
-                  </button>
-                  <button
-                    className={activeSession.canvas.mode === 'edit' ? 'is-active' : ''}
-                    type="button"
-                    onClick={() => handleToggleMode('edit')}
-                  >
-                    Edit
-                  </button>
+            {!activeSession ? (
+              <>
+                <div className="canvas-header">
+                  <div>
+                    <p className="eyebrow">Learning Canvas</p>
+                    <h2>{isAppLoading ? 'Loading…' : 'Create or choose a session'}</h2>
+                  </div>
                 </div>
-                <button className="action-button" type="button" onClick={handleDeleteSelection}>
-                  Remove selection
-                </button>
-              </div>
-            </div>
 
-            <div className="canvas-metrics">
-              <div>
-                <span>Revision</span>
-                <strong>{activeSession.canvas.revision}</strong>
-              </div>
-              <div>
-                <span>Concepts</span>
-                <strong>{conceptCount}</strong>
-              </div>
-              <div>
-                <span>Pending AI suggestions</span>
-                <strong>{activeSession.pendingSuggestions.length}</strong>
-              </div>
-            </div>
-
-            <div className="canvas-toolbar">
-              {(['concept', 'note', 'example', 'question'] as StudyNodeKind[]).map((kind) => (
-                <button
-                  key={kind}
-                  className="action-button"
-                  type="button"
-                  disabled={activeSession.canvas.mode !== 'edit'}
-                  onClick={() => handleQuickAdd(kind)}
-                >
-                  Add {kindLabels[kind]}
-                </button>
-              ))}
-            </div>
-
-            <div className="canvas-stage">
-              <div className="canvas-stage__hint">
-                {activeSession.canvas.mode === 'edit'
-                  ? 'Drag nodes, resize cards, and connect handles to build the map.'
-                  : 'View Mode removes editing clutter so the learner can read the concept map.'}
-              </div>
-
-              <CanvasModeContext value={activeSession.canvas.mode}>
-                <ReactFlow
-                  fitView
-                  proOptions={{ hideAttribution: true }}
-                  nodes={activeSession.canvas.nodes}
-                  edges={activeSession.canvas.edges}
-                  nodeTypes={nodeTypes}
-                  connectionMode={ConnectionMode.Loose}
-                  onNodesChange={handleNodesChange}
-                  onEdgesChange={handleEdgesChange}
-                  onConnect={handleConnect}
-                  onReconnect={handleReconnect}
-                  onSelectionChange={handleSelectionChange}
-                  nodesDraggable={activeSession.canvas.mode === 'edit'}
-                  nodesConnectable={activeSession.canvas.mode === 'edit'}
-                  edgesUpdatable={activeSession.canvas.mode === 'edit'}
-                  reconnectRadius={24}
-                  elementsSelectable
-                >
-                  <Background
-                    color="rgba(20, 73, 76, 0.12)"
-                    gap={22}
-                    variant={BackgroundVariant.Dots}
-                  />
-                  <MiniMap
-                    pannable
-                    zoomable
-                    nodeStrokeColor="rgba(20, 73, 76, 0.65)"
-                    nodeColor="rgba(245, 241, 230, 0.95)"
-                    maskColor="rgba(6, 28, 31, 0.18)"
-                  />
-                  <Controls showInteractive={false} />
-                </ReactFlow>
-              </CanvasModeContext>
-            </div>
-
-            <section className="inspector">
-              <div className="inspector__header">
-                <div>
-                  <p className="eyebrow">Inspector</p>
-                  <h3>
-                    {selectedNode
-                      ? selectedNode.data.title
-                      : selectedEdge
-                        ? typeof selectedEdge.label === 'string' && selectedEdge.label
-                          ? selectedEdge.label
-                          : 'Selected edge'
-                        : 'Select a node or edge'}
-                  </h3>
-                </div>
-                {selectedNode ? (
-                  <span className="chip chip--muted">{kindLabels[selectedNode.data.kind]}</span>
-                ) : selectedEdge ? (
-                  <span className="chip chip--muted">Edge</span>
-                ) : null}
-              </div>
-
-              {selectedNode ? (
-                <div className="inspector__form">
-                  <label>
-                    Title
-                    <input
-                      className="text-input"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      value={selectedNode.data.title}
-                      onChange={(event) => updateSelectedNodeField('title', event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Details
-                    <textarea
-                      className="text-area"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      rows={4}
-                      value={selectedNode.data.text}
-                      onChange={(event) => updateSelectedNodeField('text', event.target.value)}
-                    />
-                  </label>
-                </div>
-              ) : selectedEdge ? (
-                <div className="inspector__form">
-                  <label>
-                    Edge Label
-                    <input
-                      className="text-input"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      value={typeof selectedEdge.label === 'string' ? selectedEdge.label : ''}
-                      onChange={(event) => updateSelectedEdgeField('label', event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    From Node
-                    <select
-                      className="text-input"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      value={selectedEdge.source}
-                      onChange={(event) => updateSelectedEdgeField('source', event.target.value)}
-                    >
-                      {activeSession.canvas.nodes.map((node) => (
-                        <option key={node.id} value={node.id}>
-                          {node.data.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    To Node
-                    <select
-                      className="text-input"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      value={selectedEdge.target}
-                      onChange={(event) => updateSelectedEdgeField('target', event.target.value)}
-                    >
-                      {activeSession.canvas.nodes.map((node) => (
-                        <option key={node.id} value={node.id}>
-                          {node.data.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <section className="inspector">
+                  <div className="inspector__header">
+                    <div>
+                      <p className="eyebrow">Workspace Status</p>
+                      <h3>{isAppLoading ? 'Connecting to the backend' : 'No active study session'}</h3>
+                    </div>
+                  </div>
                   <p className="panel__copy">
-                    Drag either endpoint of a selected edge on the canvas to reconnect it to a
-                    different side or node.
+                    {isAppLoading
+                      ? 'Loading participant data, sessions, documents, chat history, and canvas state.'
+                      : 'Create a session from the sidebar to start building a concept map and chatting with the assistant.'}
                   </p>
+                </section>
+              </>
+            ) : (
+              <>
+                <div className="canvas-header">
+                  <div>
+                    <p className="eyebrow">Learning Canvas</p>
+                    <h2>{activeSession.title}</h2>
+                  </div>
+
+                  <div className="canvas-header__actions">
+                    <div className="mode-toggle">
+                      <button
+                        className={activeSession.canvas.mode === 'view' ? 'is-active' : ''}
+                        type="button"
+                        onClick={() => handleToggleMode('view')}
+                      >
+                        View
+                      </button>
+                      <button
+                        className={activeSession.canvas.mode === 'edit' ? 'is-active' : ''}
+                        type="button"
+                        onClick={() => handleToggleMode('edit')}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    <button className="action-button" type="button" onClick={handleDeleteSelection}>
+                      Remove selection
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <p className="panel__copy">
-                  Select a node to edit its content, or select an edge to rename it and change where
-                  it connects. In View Mode the inspector stays readable, but fields are locked.
-                </p>
-              )}
-            </section>
+
+                <div className="canvas-metrics">
+                  <div>
+                    <span>Revision</span>
+                    <strong>{activeSession.canvas.revision}</strong>
+                  </div>
+                  <div>
+                    <span>Concepts</span>
+                    <strong>{conceptCount}</strong>
+                  </div>
+                  <div>
+                    <span>Pending AI suggestions</span>
+                    <strong>{activeSession.pendingSuggestions.length}</strong>
+                  </div>
+                </div>
+
+                <div className="canvas-toolbar">
+                  {(['concept', 'note', 'example', 'question'] as StudyNodeKind[]).map((kind) => (
+                    <button
+                      key={kind}
+                      className="action-button"
+                      type="button"
+                      disabled={activeSession.canvas.mode !== 'edit'}
+                      onClick={() => handleQuickAdd(kind)}
+                    >
+                      Add {kindLabels[kind]}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="canvas-stage">
+                  <div className="canvas-stage__hint">
+                    {activeSession.canvas.mode === 'edit'
+                      ? 'Drag nodes, resize cards, and connect handles to build the map.'
+                      : 'View Mode removes editing clutter so the learner can read the concept map.'}
+                  </div>
+
+                  <CanvasModeContext value={activeSession.canvas.mode}>
+                    <ReactFlow
+                      fitView
+                      proOptions={{ hideAttribution: true }}
+                      nodes={activeSession.canvas.nodes}
+                      edges={activeSession.canvas.edges}
+                      nodeTypes={nodeTypes}
+                      connectionMode={ConnectionMode.Loose}
+                      onNodesChange={handleNodesChange}
+                      onEdgesChange={handleEdgesChange}
+                      onConnect={handleConnect}
+                      onReconnect={handleReconnect}
+                      onSelectionChange={handleSelectionChange}
+                      nodesDraggable={activeSession.canvas.mode === 'edit'}
+                      nodesConnectable={activeSession.canvas.mode === 'edit'}
+                      edgesUpdatable={activeSession.canvas.mode === 'edit'}
+                      reconnectRadius={24}
+                      elementsSelectable
+                    >
+                      <Background
+                        color="rgba(20, 73, 76, 0.12)"
+                        gap={22}
+                        variant={BackgroundVariant.Dots}
+                      />
+                      <MiniMap
+                        pannable
+                        zoomable
+                        nodeStrokeColor="rgba(20, 73, 76, 0.65)"
+                        nodeColor="rgba(245, 241, 230, 0.95)"
+                        maskColor="rgba(6, 28, 31, 0.18)"
+                      />
+                      <Controls showInteractive={false} />
+                    </ReactFlow>
+                  </CanvasModeContext>
+                </div>
+
+                <section className="inspector">
+                  <div className="inspector__header">
+                    <div>
+                      <p className="eyebrow">Inspector</p>
+                      <h3>
+                        {selectedNode
+                          ? selectedNode.data.title
+                          : selectedEdge
+                            ? typeof selectedEdge.label === 'string' && selectedEdge.label
+                              ? selectedEdge.label
+                              : 'Selected edge'
+                            : 'Select a node or edge'}
+                      </h3>
+                    </div>
+                    {selectedNode ? (
+                      <span className="chip chip--muted">{kindLabels[selectedNode.data.kind]}</span>
+                    ) : selectedEdge ? (
+                      <span className="chip chip--muted">Edge</span>
+                    ) : null}
+                  </div>
+
+                  {selectedNode ? (
+                    <div className="inspector__form">
+                      <label>
+                        Title
+                        <input
+                          className="text-input"
+                          disabled={activeSession.canvas.mode !== 'edit'}
+                          value={selectedNode.data.title}
+                          onChange={(event) => updateSelectedNodeField('title', event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Details
+                        <textarea
+                          className="text-area"
+                          disabled={activeSession.canvas.mode !== 'edit'}
+                          rows={4}
+                          value={selectedNode.data.text}
+                          onChange={(event) => updateSelectedNodeField('text', event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  ) : selectedEdge ? (
+                    <div className="inspector__form">
+                      <label>
+                        Edge Label
+                        <input
+                          className="text-input"
+                          disabled={activeSession.canvas.mode !== 'edit'}
+                          value={typeof selectedEdge.label === 'string' ? selectedEdge.label : ''}
+                          onChange={(event) => updateSelectedEdgeField('label', event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        From Node
+                        <select
+                          className="text-input"
+                          disabled={activeSession.canvas.mode !== 'edit'}
+                          value={selectedEdge.source}
+                          onChange={(event) => updateSelectedEdgeField('source', event.target.value)}
+                        >
+                          {activeSession.canvas.nodes.map((node) => (
+                            <option key={node.id} value={node.id}>
+                              {node.data.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        To Node
+                        <select
+                          className="text-input"
+                          disabled={activeSession.canvas.mode !== 'edit'}
+                          value={selectedEdge.target}
+                          onChange={(event) => updateSelectedEdgeField('target', event.target.value)}
+                        >
+                          {activeSession.canvas.nodes.map((node) => (
+                            <option key={node.id} value={node.id}>
+                              {node.data.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="panel__copy">
+                        Drag either endpoint of a selected edge on the canvas to reconnect it to a
+                        different side or node.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="panel__copy">
+                      Select a node to edit its content, or select an edge to rename it and change where
+                      it connects. In View Mode the inspector stays readable, but fields are locked.
+                    </p>
+                  )}
+                </section>
+              </>
+            )}
           </main>
         </div>
 
         <div className="assistant-dock">
-          {isAssistantOpen ? (
+          {isAssistantOpen && activeSession ? (
             <section className="panel panel--assistant assistant-window">
               <div className="assistant-window__header">
                 <div>
@@ -1228,8 +1394,8 @@ function App() {
               </div>
 
               <p className="panel__copy assistant-window__copy">
-                The assistant can answer questions in Markdown and propose structured canvas edits
-                that you explicitly accept or dismiss.
+                The assistant now reads session history and the saved canvas through the backend API,
+                then proposes structured canvas edits that you explicitly accept or dismiss.
               </p>
 
               <div className="assistant-window__body">
@@ -1317,11 +1483,20 @@ function App() {
                   rows={4}
                 />
                 <div className="composer__actions">
-                  <button className="action-button" type="button" onClick={handleAskAndMap}>
+                  <button
+                    className="action-button"
+                    disabled={isSendingMessage || !chatInput.trim()}
+                    type="button"
+                    onClick={handleAskAndMap}
+                  >
                     Ask + Map
                   </button>
-                  <button className="action-button action-button--primary" type="submit">
-                    Send
+                  <button
+                    className="action-button action-button--primary"
+                    disabled={isSendingMessage || !chatInput.trim()}
+                    type="submit"
+                  >
+                    {isSendingMessage ? 'Sending…' : 'Send'}
                   </button>
                 </div>
               </form>
@@ -1331,12 +1506,13 @@ function App() {
           <button
             aria-label={isAssistantOpen ? 'Hide assistant' : 'Show assistant'}
             className={`action-button assistant-launcher ${isAssistantOpen ? 'is-open' : ''}`}
+            disabled={!activeSession}
             type="button"
             onClick={handleToggleAssistant}
           >
             <AssistantIcon />
             <span>Assistant</span>
-            {activeSession.pendingSuggestions.length ? (
+            {activeSession?.pendingSuggestions.length ? (
               <span className="assistant-launcher__count">{activeSession.pendingSuggestions.length}</span>
             ) : null}
           </button>
