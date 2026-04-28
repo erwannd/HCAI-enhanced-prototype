@@ -5,6 +5,7 @@ import type {
   CanvasState,
   CanvasSuggestion,
   ChatMessage,
+  RetrievedDocument,
   StudyNodeKind,
   StudySession,
   SystemId,
@@ -58,6 +59,7 @@ type ApiInteraction = {
   botResponse: string
   timestamp?: string
   createdAt?: string
+  retrievedDocuments?: RetrievedDocument[]
 }
 
 type ApiDocument = {
@@ -89,6 +91,7 @@ type DocumentsResponse = {
 type ChatResponse = {
   interaction?: ApiInteraction
   botResponse: string
+  retrievedDocuments?: RetrievedDocument[]
 }
 
 type ApiSuggestionOperation =
@@ -357,6 +360,8 @@ export function mapApiInteractionsToChatHistory(interactions: ApiInteraction[]):
         role: 'assistant' as const,
         content: interaction.botResponse,
         createdAt: formatMessageTime(timestamp),
+        retrievedDocuments: interaction.retrievedDocuments ?? [],
+        areRetrievedDocumentsExpanded: false,
       },
     ]
   })

@@ -30,6 +30,15 @@ export type ChatMessage = {
   kind?: 'default' | 'status' | 'suggestion'
   suggestionId?: string
   suggestionState?: 'pending' | 'accepted' | 'dismissed'
+  retrievedDocuments?: RetrievedDocument[]
+  areRetrievedDocumentsExpanded?: boolean
+}
+
+export type RetrievedDocument = {
+  docName: string
+  chunkIndex: number | null
+  chunkText: string
+  relevanceScore: number | null
 }
 
 export type CanvasOperation =

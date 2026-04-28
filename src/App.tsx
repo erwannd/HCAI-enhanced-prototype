@@ -43,6 +43,7 @@ import type {
   CanvasMode,
   CanvasOperation,
   ChatMessage,
+  RetrievedDocument,
   StudyCanvasEdge,
   StudyCanvasNode,
   StudyNodeKind,
@@ -154,6 +155,14 @@ function createMessage(role: ChatMessage['role'], content: string): ChatMessage 
     createdAt: formatNow(),
     kind: 'default',
   }
+}
+
+function formatRelevanceScore(score: number | null | undefined) {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return 'n/a'
+  }
+
+  return score.toFixed(2)
 }
 
 function createNode(
@@ -519,6 +528,17 @@ function App() {
     }))
   }
 
+  function handleToggleRetrievedDocuments(messageId: string) {
+    if (!activeSession) {
+      return
+    }
+
+    updateChatMessage(activeSession.id, messageId, (message) => ({
+      ...message,
+      areRetrievedDocumentsExpanded: !message.areRetrievedDocumentsExpanded,
+    }))
+  }
+
   async function persistCanvasForSession(
     sessionId: string,
     canvas: StudySession['canvas'],
@@ -880,6 +900,8 @@ function App() {
         ...message,
         content: response.botResponse,
         kind: 'default',
+        retrievedDocuments: response.retrievedDocuments ?? [],
+        areRetrievedDocumentsExpanded: false,
       }))
 
       updateSession(session.id, (currentSession) => ({
@@ -1513,6 +1535,41 @@ ${suggestion.reason}`,
                         <span>{message.createdAt}</span>
                       </div>
                       <MessageContent content={message.content} />
+                      {message.role === 'assistant' && message.retrievedDocuments?.length ? (
+                        <div className="message__retrieval">
+                          <button
+                            aria-expanded={message.areRetrievedDocumentsExpanded ? 'true' : 'false'}
+                            className="message__retrieval-toggle"
+                            type="button"
+                            onClick={() => handleToggleRetrievedDocuments(message.id)}
+                          >
+                            {message.areRetrievedDocumentsExpanded ? 'Hide relevant documents' : 'Relevant documents'}{' '}
+                            ({message.retrievedDocuments.length})
+                          </button>
+
+                          {message.areRetrievedDocumentsExpanded ? (
+                            <div className="message__retrieval-list">
+                              {message.retrievedDocuments.map((document: RetrievedDocument, index) => (
+                                <article
+                                  className="message__retrieval-card"
+                                  key={`${message.id}-${document.docName}-${document.chunkIndex ?? index}`}
+                                >
+                                  <div className="message__retrieval-meta">
+                                    <strong>{document.docName}</strong>
+                                    <span>
+                                      Relevance score: {formatRelevanceScore(document.relevanceScore)}
+                                    </span>
+                                  </div>
+                                  <p className="message__retrieval-chunk-label">
+                                    Chunk {document.chunkIndex ?? index + 1}
+                                  </p>
+                                  <p>{document.chunkText}</p>
+                                </article>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {message.kind === 'suggestion' ? (
                         <div className="message__suggestion-footer">
                           {message.suggestionState === 'pending' ? (
