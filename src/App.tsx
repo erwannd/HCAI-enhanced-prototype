@@ -152,6 +152,7 @@ function createMessage(role: ChatMessage['role'], content: string): ChatMessage 
     role,
     content,
     createdAt: formatNow(),
+    kind: 'default',
   }
 }
 
@@ -360,6 +361,7 @@ function App() {
   const [isWorkspaceSidebarOpen, setIsWorkspaceSidebarOpen] = useState(true)
   const [workspaceSidebarView, setWorkspaceSidebarView] = useState<WorkspaceSidebarView>('sessions')
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
+  const [isAskAndMapEnabled, setIsAskAndMapEnabled] = useState(false)
   const [isAppLoading, setIsAppLoading] = useState(true)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
@@ -504,6 +506,19 @@ function App() {
     updateSession(activeSessionId, updater)
   }
 
+  function updateChatMessage(
+    sessionId: string,
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      chatHistory: session.chatHistory.map((message) =>
+        message.id === messageId ? updater(message) : message,
+      ),
+    }))
+  }
+
   async function persistCanvasForSession(
     sessionId: string,
     canvas: StudySession['canvas'],
@@ -602,6 +617,10 @@ function App() {
 
   function handleToggleAssistant() {
     setIsAssistantOpen((currentValue) => !currentValue)
+  }
+
+  function handleToggleAskAndMap() {
+    setIsAskAndMapEnabled((currentValue) => !currentValue)
   }
 
   function handleToggleMode(nextMode: CanvasMode) {
@@ -832,10 +851,18 @@ function App() {
     }
 
     const userMessage = createMessage('user', trimmedQuestion)
+    const answerMessageId = createId('msg')
+    const pendingAnswerMessage: ChatMessage = {
+      id: answerMessageId,
+      role: 'assistant',
+      content: 'Preparing answer…',
+      createdAt: formatNow(),
+      kind: 'status',
+    }
 
     updateSession(session.id, (currentSession) => ({
       ...currentSession,
-      chatHistory: [...currentSession.chatHistory, userMessage],
+      chatHistory: [...currentSession.chatHistory, userMessage, pendingAnswerMessage],
     }))
 
     setChatInput('')
@@ -849,15 +876,32 @@ function App() {
       }
 
       const response = await sendChatMessage(session.id, trimmedQuestion)
-      const assistantMessage = createMessage('assistant', response.botResponse)
+      updateChatMessage(session.id, answerMessageId, (message) => ({
+        ...message,
+        content: response.botResponse,
+        kind: 'default',
+      }))
 
       updateSession(session.id, (currentSession) => ({
         ...currentSession,
-        chatHistory: [...currentSession.chatHistory, assistantMessage],
         followUpQuestions: getDefaultFollowUpQuestions(currentSession.title, trimmedQuestion),
       }))
 
       if (withCanvasPlan) {
+        const suggestionStatusMessageId = createId('msg')
+        const pendingSuggestionMessage: ChatMessage = {
+          id: suggestionStatusMessageId,
+          role: 'assistant',
+          content: 'Preparing canvas suggestion…',
+          createdAt: formatNow(),
+          kind: 'status',
+        }
+
+        updateSession(session.id, (currentSession) => ({
+          ...currentSession,
+          chatHistory: [...currentSession.chatHistory, pendingSuggestionMessage],
+        }))
+
         try {
           const suggestionResponse = await fetchCanvasSuggestions(
             session.id,
@@ -874,18 +918,59 @@ function App() {
             if (mappedSuggestions.length === 0) {
               return {
                 ...currentSession,
-                chatHistory: [
-                  ...currentSession.chatHistory,
-                  createMessage(
-                    'assistant',
-                    'I answered the question, but I did not generate a canvas edit suggestion for this turn. Try a more specific Ask + Map request if you want a concrete map change.',
-                  ),
-                ],
+                chatHistory: currentSession.chatHistory.map((message) =>
+                  message.id === suggestionStatusMessageId
+                    ? {
+                        ...message,
+                        content:
+                          'I answered the question, but I do not recommend a canvas update for this turn.',
+                        kind: 'default',
+                      }
+                    : message,
+                ),
               }
             }
 
+            const [firstSuggestion, ...remainingSuggestions] = mappedSuggestions
+            const firstSuggestionMessage: ChatMessage = {
+              id: suggestionStatusMessageId,
+              role: 'assistant',
+              content: `### ${firstSuggestion.title}
+
+${firstSuggestion.summary}
+
+${firstSuggestion.reason}`,
+              createdAt: currentSession.chatHistory.find(
+                (message) => message.id === suggestionStatusMessageId,
+              )?.createdAt ?? formatNow(),
+              kind: 'suggestion',
+              suggestionId: firstSuggestion.id,
+              suggestionState: 'pending',
+            }
+            const remainingSuggestionMessages = remainingSuggestions.map((suggestion) => ({
+              id: createId('msg'),
+              role: 'assistant' as const,
+              content: `### ${suggestion.title}
+
+${suggestion.summary}
+
+${suggestion.reason}`,
+              createdAt: formatNow(),
+              kind: 'suggestion' as const,
+              suggestionId: suggestion.id,
+              suggestionState: 'pending' as const,
+            }))
+
             return {
               ...currentSession,
+              chatHistory: [
+                ...currentSession.chatHistory.map((message) =>
+                  message.id === suggestionStatusMessageId
+                    ? firstSuggestionMessage
+                    : message,
+                ),
+                ...remainingSuggestionMessages,
+              ],
               pendingSuggestions: [
                 ...mappedSuggestions,
                 ...currentSession.pendingSuggestions,
@@ -893,18 +978,19 @@ function App() {
             }
           })
         } catch (error) {
+          updateChatMessage(session.id, suggestionStatusMessageId, (message) => ({
+            ...message,
+            content: 'I could not prepare a canvas suggestion for this turn.',
+            kind: 'default',
+          }))
           setAppError(`Could not generate canvas suggestions: ${normalizeErrorMessage(error)}`)
         }
       }
     } catch (error) {
-      const failureMessage = createMessage(
-        'assistant',
-        `I could not get a response from the backend right now.\n\n${normalizeErrorMessage(error)}`,
-      )
-
-      updateSession(session.id, (currentSession) => ({
-        ...currentSession,
-        chatHistory: [...currentSession.chatHistory, failureMessage],
+      updateChatMessage(session.id, answerMessageId, (message) => ({
+        ...message,
+        content: `I could not get a response from the backend right now.\n\n${normalizeErrorMessage(error)}`,
+        kind: 'default',
       }))
 
       setAppError(`Could not send the message: ${normalizeErrorMessage(error)}`)
@@ -915,22 +1001,18 @@ function App() {
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void submitChat(chatInput, false)
+    void submitChat(chatInput, isAskAndMapEnabled)
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void submitChat(chatInput, false)
+      void submitChat(chatInput, isAskAndMapEnabled)
     }
   }
 
-  function handleAskAndMap() {
-    void submitChat(chatInput, true)
-  }
-
   function handleFollowUp(question: string) {
-    void submitChat(question, false)
+    void submitChat(question, isAskAndMapEnabled)
   }
 
   function handleAcceptSuggestion(suggestionId: string) {
@@ -963,6 +1045,14 @@ function App() {
       return {
         ...session,
         canvas: nextCanvas,
+        chatHistory: session.chatHistory.map((message) =>
+          message.suggestionId === suggestionId
+            ? {
+                ...message,
+                suggestionState: 'accepted',
+              }
+            : message,
+        ),
         pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
       }
     })
@@ -984,6 +1074,14 @@ function App() {
 
     updateActiveSession((session) => ({
       ...session,
+      chatHistory: session.chatHistory.map((message) =>
+        message.suggestionId === suggestionId
+          ? {
+              ...message,
+              suggestionState: 'dismissed',
+            }
+          : message,
+      ),
       pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
     }))
   }
@@ -1398,12 +1496,49 @@ function App() {
               <div className="assistant-window__body">
                 <div className="message-list">
                   {activeSession.chatHistory.map((message) => (
-                    <article className={`message message--${message.role}`} key={message.id}>
+                    <article
+                      className={`message message--${message.role} ${
+                        message.kind ? `message--${message.kind}` : ''
+                      }`}
+                      key={message.id}
+                    >
                       <div className="message__meta">
-                        <strong>{message.role === 'assistant' ? 'Assistant' : 'You'}</strong>
+                        <strong>
+                          {message.kind === 'suggestion'
+                            ? 'Canvas suggestion'
+                            : message.role === 'assistant'
+                              ? 'Assistant'
+                              : 'You'}
+                        </strong>
                         <span>{message.createdAt}</span>
                       </div>
                       <MessageContent content={message.content} />
+                      {message.kind === 'suggestion' ? (
+                        <div className="message__suggestion-footer">
+                          {message.suggestionState === 'pending' ? (
+                            <>
+                              <button
+                                className="action-button action-button--primary"
+                                type="button"
+                                onClick={() => message.suggestionId && handleAcceptSuggestion(message.suggestionId)}
+                              >
+                                Accept
+                              </button>
+                              <button
+                                className="action-button"
+                                type="button"
+                                onClick={() => message.suggestionId && handleDismissSuggestion(message.suggestionId)}
+                              >
+                                Dismiss
+                              </button>
+                            </>
+                          ) : (
+                            <span className="chip chip--muted">
+                              {message.suggestionState === 'accepted' ? 'Accepted' : 'Dismissed'}
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -1426,48 +1561,6 @@ function App() {
                     ))}
                   </div>
                 </section>
-
-                <section className="chat-section">
-                  <div className="panel__heading-row">
-                    <h3>AI canvas suggestions</h3>
-                    <span>{activeSession.pendingSuggestions.length}</span>
-                  </div>
-
-                  <div className="suggestion-list">
-                    {activeSession.pendingSuggestions.map((suggestion) => (
-                      <article className="suggestion-card" key={suggestion.id}>
-                        <div>
-                          <h4>{suggestion.title}</h4>
-                          <p>{suggestion.summary}</p>
-                          <small>{suggestion.reason}</small>
-                        </div>
-                        <div className="suggestion-card__actions">
-                          <button
-                            className="action-button action-button--primary"
-                            type="button"
-                            onClick={() => handleAcceptSuggestion(suggestion.id)}
-                          >
-                            Accept
-                          </button>
-                          <button
-                            className="action-button"
-                            type="button"
-                            onClick={() => handleDismissSuggestion(suggestion.id)}
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-
-                    {!activeSession.pendingSuggestions.length ? (
-                      <p className="panel__copy">
-                        Use <strong>Ask + Map</strong> when you want the assistant to reply and prepare a
-                        structured canvas change.
-                      </p>
-                    ) : null}
-                  </div>
-                </section>
               </div>
 
               <form className="composer" onSubmit={handleSend}>
@@ -1481,17 +1574,18 @@ function App() {
                 />
                 <div className="composer__actions">
                   <button
-                    className="action-button"
-                    disabled={isSendingMessage || !chatInput.trim()}
+                    aria-pressed={isAskAndMapEnabled}
+                    className={`action-button ${isAskAndMapEnabled ? 'is-active' : ''}`}
                     type="button"
-                    onClick={handleAskAndMap}
+                    onClick={handleToggleAskAndMap}
                   >
-                    Ask + Map
+                    {isAskAndMapEnabled ? 'Ask + Map On' : 'Ask + Map Off'}
                   </button>
                   <button
                     className="action-button action-button--primary"
                     disabled={isSendingMessage || !chatInput.trim()}
-                    type="submit"
+                    type="button"
+                    onClick={() => void submitChat(chatInput, isAskAndMapEnabled)}
                   >
                     {isSendingMessage ? 'Sending…' : 'Send'}
                   </button>

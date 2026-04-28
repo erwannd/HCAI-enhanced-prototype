@@ -134,6 +134,16 @@
   transform: translateY(-1px);
 }
 
+.action-button.is-active {
+  background: rgba(20, 73, 76, 0.92);
+  color: #f8f5ec;
+  border-color: transparent;
+}
+
+.action-button.is-active:hover:not(:disabled) {
+  background: rgba(16, 61, 64, 0.96);
+}
+
 .action-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -617,6 +627,17 @@
   background: rgba(20, 73, 76, 0.1);
 }
 
+.message--status {
+  background: rgba(20, 73, 76, 0.05);
+  border-style: dashed;
+  color: var(--ink-subtle);
+}
+
+.message--suggestion {
+  background: rgba(20, 73, 76, 0.12);
+  border-color: rgba(20, 73, 76, 0.26);
+}
+
 .message__meta {
   display: flex;
   justify-content: space-between;
@@ -680,35 +701,15 @@
   color: var(--ink-subtle);
 }
 
+.message__suggestion-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .chat-section {
   margin-bottom: 18px;
-}
-
-.suggestion-list {
-  display: grid;
-  gap: 12px;
-}
-
-.suggestion-card {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 22px;
-  background: rgba(20, 73, 76, 0.08);
-}
-
-.suggestion-card h4 {
-  margin: 0 0 6px;
-}
-
-.suggestion-card p,
-.suggestion-card small {
-  color: var(--ink-subtle);
-}
-
-.suggestion-card__actions {
-  display: flex;
-  gap: 10px;
 }
 
 .composer {
@@ -922,7 +923,7 @@
   }
 
   .composer__actions,
-  .suggestion-card__actions {
+  .message__suggestion-footer {
     flex-wrap: wrap;
   }
 }

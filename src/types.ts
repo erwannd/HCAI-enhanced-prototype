@@ -27,6 +27,9 @@ export type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: string
+  kind?: 'default' | 'status' | 'suggestion'
+  suggestionId?: string
+  suggestionState?: 'pending' | 'accepted' | 'dismissed'
 }
 
 export type CanvasOperation =
