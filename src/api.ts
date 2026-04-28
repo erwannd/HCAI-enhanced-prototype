@@ -1,5 +1,14 @@
 import { MarkerType, type Edge, type Node } from 'reactflow'
-import type { CanvasMode, CanvasState, ChatMessage, StudyNodeKind, StudySession, SystemId } from './types'
+import type {
+  CanvasMode,
+  CanvasOperation,
+  CanvasState,
+  CanvasSuggestion,
+  ChatMessage,
+  StudyNodeKind,
+  StudySession,
+  SystemId,
+} from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api'
 
@@ -82,6 +91,55 @@ type ChatResponse = {
   botResponse: string
 }
 
+type ApiSuggestionOperation =
+  | {
+      type: 'add_node'
+      node: {
+        nodeID: string
+        nodeType: StudyNodeKind
+        title: string
+        text: string
+      }
+    }
+  | {
+      type: 'update_node'
+      nodeID: string
+      patch: {
+        title?: string
+        text?: string
+        nodeType?: StudyNodeKind
+      }
+    }
+  | {
+      type: 'delete_node'
+      nodeID: string
+    }
+  | {
+      type: 'add_edge'
+      edge: {
+        edgeID: string
+        sourceNodeID: string
+        targetNodeID: string
+        label?: string
+      }
+    }
+  | {
+      type: 'remove_edge'
+      edgeID: string
+    }
+
+type ApiSuggestion = {
+  id: string
+  title: string
+  summary: string
+  reason: string
+  operations: ApiSuggestionOperation[]
+}
+
+type SuggestionResponse = {
+  suggestions: ApiSuggestion[]
+}
+
 type HydratedSessionBase = Omit<StudySession, 'followUpQuestions' | 'pendingSuggestions'>
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -151,6 +209,125 @@ function mapApiEdgeToReactFlowEdge(edge: ApiCanvasEdge): Edge {
   }
 }
 
+function getSuggestedNodePlacement(canvas: CanvasState) {
+  const nodeCount = canvas.nodes.length
+  const column = nodeCount % 3
+  const row = Math.floor(nodeCount / 3)
+
+  return {
+    x: 70 + column * 280,
+    y: 70 + row * 200,
+  }
+}
+
+function mapApiSuggestionOperationToCanvasOperation(
+  operation: ApiSuggestionOperation,
+  canvas: CanvasState,
+): CanvasOperation | null {
+  if (operation.type === 'add_node') {
+    const placement = getSuggestedNodePlacement(canvas)
+
+    return {
+      type: 'add_node',
+      node: {
+        id: operation.node.nodeID,
+        type: 'study',
+        position: placement,
+        width: 250,
+        height: 166,
+        style: { width: 250, height: 166 },
+        data: {
+          kind: operation.node.nodeType,
+          title: operation.node.title,
+          text: operation.node.text,
+        },
+      },
+    }
+  }
+
+  if (operation.type === 'update_node') {
+    return {
+      type: 'update_node',
+      nodeId: operation.nodeID,
+      patch: {
+        data: {
+          ...(operation.patch.nodeType ? { kind: operation.patch.nodeType } : {}),
+          ...(operation.patch.title !== undefined ? { title: operation.patch.title } : {}),
+          ...(operation.patch.text !== undefined ? { text: operation.patch.text } : {}),
+        },
+      },
+    }
+  }
+
+  if (operation.type === 'delete_node') {
+    return {
+      type: 'delete_node',
+      nodeId: operation.nodeID,
+    }
+  }
+
+  if (operation.type === 'add_edge') {
+    return {
+      type: 'add_edge',
+      edge: {
+        id: operation.edge.edgeID,
+        source: operation.edge.sourceNodeID,
+        target: operation.edge.targetNodeID,
+        label: operation.edge.label ?? '',
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed },
+      },
+    }
+  }
+
+  return {
+    type: 'remove_edge',
+    edgeId: operation.edgeID,
+  }
+}
+
+export function mapApiSuggestionToCanvasSuggestion(
+  suggestion: ApiSuggestion,
+  canvas: CanvasState,
+): CanvasSuggestion {
+  return {
+    id: suggestion.id,
+    title: suggestion.title,
+    summary: suggestion.summary,
+    reason: suggestion.reason,
+    operations: suggestion.operations
+      .map((operation) => mapApiSuggestionOperationToCanvasOperation(operation, canvas))
+      .filter((operation): operation is CanvasOperation => operation !== null),
+  }
+}
+
+export function mapApiSuggestionsToCanvasSuggestions(
+  suggestions: ApiSuggestion[],
+  canvas: CanvasState,
+): CanvasSuggestion[] {
+  const workingCanvas: CanvasState = {
+    ...canvas,
+    nodes: [...canvas.nodes],
+    edges: [...canvas.edges],
+  }
+
+  return suggestions.map((suggestion) => {
+    const mappedSuggestion = mapApiSuggestionToCanvasSuggestion(suggestion, workingCanvas)
+
+    mappedSuggestion.operations.forEach((operation) => {
+      if (operation.type === 'add_node') {
+        workingCanvas.nodes.push(operation.node)
+      }
+
+      if (operation.type === 'add_edge') {
+        workingCanvas.edges.push(operation.edge)
+      }
+    })
+
+    return mappedSuggestion
+  })
+}
+
 export function mapApiCanvasToCanvasState(
   canvas: ApiCanvas,
   mode: CanvasMode = 'edit',
@@ -206,7 +383,12 @@ export async function fetchCanvas(sessionID: string) {
   return response.canvas
 }
 
-export async function saveCanvasState(sessionID: string, canvas: CanvasState, actor: 'user' | 'assistant' = 'user') {
+export async function saveCanvasState(
+  sessionID: string,
+  canvas: CanvasState,
+  actor: 'user' | 'assistant' = 'user',
+  operations: CanvasOperation[] = [],
+) {
   const response = await request<CanvasResponse>(`/sessions/${sessionID}/canvas`, {
     method: 'PUT',
     body: JSON.stringify({
@@ -214,6 +396,7 @@ export async function saveCanvasState(sessionID: string, canvas: CanvasState, ac
       revision: canvas.revision,
       nodes: canvas.nodes,
       edges: canvas.edges,
+      operations,
     }),
   })
 
@@ -261,6 +444,20 @@ export async function sendChatMessage(sessionID: string, input: string) {
   return request<ChatResponse>(`/sessions/${sessionID}/chat`, {
     method: 'POST',
     body: JSON.stringify({ input }),
+  })
+}
+
+export async function fetchCanvasSuggestions(
+  sessionID: string,
+  userInput: string,
+  assistantResponse: string,
+) {
+  return request<SuggestionResponse>(`/sessions/${sessionID}/canvas-suggestions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      userInput,
+      assistantResponse,
+    }),
   })
 }
 

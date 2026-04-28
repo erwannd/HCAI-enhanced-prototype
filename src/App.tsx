@@ -29,7 +29,9 @@ import './App.css'
 import {
   bootstrapParticipant,
   createBackendSession,
+  fetchCanvasSuggestions,
   hydrateSession,
+  mapApiSuggestionsToCanvasSuggestions,
   saveCanvasState,
   sendChatMessage,
   uploadDocument,
@@ -40,7 +42,6 @@ import { CanvasModeContext } from './canvas-mode'
 import type {
   CanvasMode,
   CanvasOperation,
-  CanvasSuggestion,
   ChatMessage,
   StudyCanvasEdge,
   StudyCanvasNode,
@@ -172,23 +173,6 @@ function createNode(
   }
 }
 
-function createEdge(
-  source: string,
-  target: string,
-  label: string,
-  animated = false,
-): StudyCanvasEdge {
-  return {
-    id: createId('edge'),
-    source,
-    target,
-    label,
-    type: 'smoothstep',
-    animated,
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }
-}
-
 function normalizeErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message
@@ -312,76 +296,6 @@ function buildFrontendSession(session: Omit<StudySession, 'followUpQuestions' | 
     chatHistory: session.chatHistory.length > 0 ? session.chatHistory : [createWelcomeMessage(session.title)],
     followUpQuestions: getDefaultFollowUpQuestions(session.title),
     pendingSuggestions: [],
-  }
-}
-
-function createSuggestionForQuestion(question: string, session: StudySession): CanvasSuggestion {
-  const lowerQuestion = question.toLowerCase()
-  const baseNode = session.canvas.nodes.find((node) => node.data.kind === 'concept') ?? session.canvas.nodes[0]
-  const column = session.canvas.nodes.length % 3
-  const row = Math.floor(session.canvas.nodes.length / 3)
-  const x = 70 + column * 280
-  const y = 70 + row * 200
-
-  if (lowerQuestion.includes('cluster')) {
-    const node = createNode(
-      'example',
-      x,
-      y,
-      'Cluster Quality',
-      'Check whether points inside a cluster stay close while clusters stay distinct.',
-    )
-
-    return {
-      id: createId('suggestion'),
-      title: 'Map cluster quality',
-      summary: 'Add a node for evaluating whether a clustering result is actually useful.',
-      reason: 'This gives the learner a bridge from algorithm steps to interpretation.',
-      operations: [
-        { type: 'add_node', node },
-        ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(baseNode.id, node.id, 'evaluate') }] : []),
-      ],
-    }
-  }
-
-  if (lowerQuestion.includes('regress')) {
-    const node = createNode(
-      'note',
-      x,
-      y,
-      'Line of Best Fit',
-      'A compact intuition: regression finds the line that reduces overall error.',
-    )
-
-    return {
-      id: createId('suggestion'),
-      title: 'Add regression intuition',
-      summary: 'Capture a learner-friendly note that connects the formula to the geometric picture.',
-      reason: 'Beginners often need a bridge between algebra and intuition.',
-      operations: [
-        { type: 'add_node', node },
-        ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(node.id, baseNode.id, 'explains') }] : []),
-      ],
-    }
-  }
-
-  const node = createNode(
-    'concept',
-    x,
-    y,
-    'Explained Variance',
-    'How much of the original data spread is preserved by a component.',
-  )
-
-  return {
-    id: createId('suggestion'),
-    title: 'Extend the PCA map',
-    summary: 'Add explained variance so the map captures how components are evaluated.',
-    reason: 'This is a natural next concept after introducing PCA.',
-    operations: [
-      { type: 'add_node', node },
-      ...(baseNode ? [{ type: 'add_edge' as const, edge: createEdge(node.id, baseNode.id, 'measures') }] : []),
-    ],
   }
 }
 
@@ -588,6 +502,42 @@ function App() {
     }
 
     updateSession(activeSessionId, updater)
+  }
+
+  async function persistCanvasForSession(
+    sessionId: string,
+    canvas: StudySession['canvas'],
+    actor: 'user' | 'assistant' = 'user',
+    operations: CanvasOperation[] = [],
+  ) {
+    const previousHydratedRevision = hydratedCanvasRevisionsRef.current[sessionId]
+    hydratedCanvasRevisionsRef.current[sessionId] = canvas.revision
+
+    try {
+      const savedCanvas = await saveCanvasState(sessionId, canvas, actor, operations)
+      hydratedCanvasRevisionsRef.current[sessionId] = savedCanvas.revision
+
+      if (savedCanvas.revision !== canvas.revision) {
+        setSessions((currentSessions) =>
+          currentSessions.map((session) =>
+            session.id === sessionId && session.canvas.revision === canvas.revision
+              ? {
+                  ...session,
+                  canvas: {
+                    ...session.canvas,
+                    revision: savedCanvas.revision,
+                  },
+                }
+              : session,
+          ),
+        )
+      }
+
+      return savedCanvas
+    } catch (error) {
+      hydratedCanvasRevisionsRef.current[sessionId] = previousHydratedRevision
+      throw error
+    }
   }
 
   function handleSwitchSession(sessionId: string) {
@@ -894,21 +844,58 @@ function App() {
     setAppError(null)
 
     try {
+      if (hydratedCanvasRevisionsRef.current[session.id] !== session.canvas.revision) {
+        await persistCanvasForSession(session.id, session.canvas, 'user')
+      }
+
       const response = await sendChatMessage(session.id, trimmedQuestion)
       const assistantMessage = createMessage('assistant', response.botResponse)
 
-      updateSession(session.id, (currentSession) => {
-        const suggestion = withCanvasPlan ? createSuggestionForQuestion(trimmedQuestion, currentSession) : undefined
+      updateSession(session.id, (currentSession) => ({
+        ...currentSession,
+        chatHistory: [...currentSession.chatHistory, assistantMessage],
+        followUpQuestions: getDefaultFollowUpQuestions(currentSession.title, trimmedQuestion),
+      }))
 
-        return {
-          ...currentSession,
-          chatHistory: [...currentSession.chatHistory, assistantMessage],
-          followUpQuestions: getDefaultFollowUpQuestions(currentSession.title, trimmedQuestion),
-          pendingSuggestions: suggestion
-            ? [suggestion, ...currentSession.pendingSuggestions]
-            : currentSession.pendingSuggestions,
+      if (withCanvasPlan) {
+        try {
+          const suggestionResponse = await fetchCanvasSuggestions(
+            session.id,
+            trimmedQuestion,
+            response.botResponse,
+          )
+
+          updateSession(session.id, (currentSession) => {
+            const mappedSuggestions = mapApiSuggestionsToCanvasSuggestions(
+              suggestionResponse.suggestions,
+              currentSession.canvas,
+            )
+
+            if (mappedSuggestions.length === 0) {
+              return {
+                ...currentSession,
+                chatHistory: [
+                  ...currentSession.chatHistory,
+                  createMessage(
+                    'assistant',
+                    'I answered the question, but I did not generate a canvas edit suggestion for this turn. Try a more specific Ask + Map request if you want a concrete map change.',
+                  ),
+                ],
+              }
+            }
+
+            return {
+              ...currentSession,
+              pendingSuggestions: [
+                ...mappedSuggestions,
+                ...currentSession.pendingSuggestions,
+              ],
+            }
+          })
+        } catch (error) {
+          setAppError(`Could not generate canvas suggestions: ${normalizeErrorMessage(error)}`)
         }
-      })
+      }
     } catch (error) {
       const failureMessage = createMessage(
         'assistant',
@@ -957,24 +944,34 @@ function App() {
       return
     }
 
-    updateActiveSession((session) => {
-      const applied = applyCanvasOperations(
-        session.canvas.nodes,
-        session.canvas.edges,
-        suggestion.operations,
-      )
+    const applied = applyCanvasOperations(
+      activeSession.canvas.nodes,
+      activeSession.canvas.edges,
+      suggestion.operations,
+    )
 
+    const nextCanvas = {
+      ...activeSession.canvas,
+      revision: activeSession.canvas.revision + 1,
+      nodes: applied.nodes,
+      edges: applied.edges,
+    }
+
+    hydratedCanvasRevisionsRef.current[activeSession.id] = nextCanvas.revision
+
+    updateActiveSession((session) => {
       return {
         ...session,
-        canvas: {
-          ...session.canvas,
-          revision: session.canvas.revision + 1,
-          nodes: applied.nodes,
-          edges: applied.edges,
-        },
+        canvas: nextCanvas,
         pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
       }
     })
+
+    void persistCanvasForSession(activeSession.id, nextCanvas, 'assistant', suggestion.operations).catch(
+      (error) => {
+        setAppError(`Could not persist the accepted AI edit: ${normalizeErrorMessage(error)}`)
+      },
+    )
 
     const addedNode = suggestion.operations.find((operation) => operation.type === 'add_node')
     setSelectedNodeId(addedNode?.type === 'add_node' ? addedNode.node.id : null)
