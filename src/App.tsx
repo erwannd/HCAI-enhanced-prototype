@@ -1503,19 +1503,21 @@ function App() {
             </section>
           ) : null}
 
-          <button
-            aria-label={isAssistantOpen ? 'Hide assistant' : 'Show assistant'}
-            className={`action-button assistant-launcher ${isAssistantOpen ? 'is-open' : ''}`}
-            disabled={!activeSession}
-            type="button"
-            onClick={handleToggleAssistant}
-          >
-            <AssistantIcon />
-            <span>Assistant</span>
-            {activeSession?.pendingSuggestions.length ? (
-              <span className="assistant-launcher__count">{activeSession.pendingSuggestions.length}</span>
-            ) : null}
-          </button>
+          {!isAssistantOpen ? (
+            <button
+              aria-label="Show assistant"
+              className="action-button assistant-launcher"
+              disabled={!activeSession}
+              type="button"
+              onClick={handleToggleAssistant}
+            >
+              <AssistantIcon />
+              <span>Assistant</span>
+              {activeSession?.pendingSuggestions.length ? (
+                <span className="assistant-launcher__count">{activeSession.pendingSuggestions.length}</span>
+              ) : null}
+            </button>
+          ) : null}
         </div>
       </div>
     </ReactFlowProvider>
