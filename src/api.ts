@@ -145,6 +145,13 @@ type SuggestionResponse = {
 
 type HydratedSessionBase = Omit<StudySession, 'followUpQuestions' | 'pendingSuggestions'>
 
+type StudyEventPayload = {
+  eventType: string
+  elementName: string
+  metadata?: Record<string, unknown>
+  timestamp?: string
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -463,6 +470,13 @@ export async function fetchCanvasSuggestions(
       userInput,
       assistantResponse,
     }),
+  })
+}
+
+export async function logStudyEvent(sessionID: string, payload: StudyEventPayload) {
+  return request<{ event: unknown }>(`/sessions/${sessionID}/events`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

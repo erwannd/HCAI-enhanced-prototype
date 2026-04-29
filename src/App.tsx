@@ -31,6 +31,7 @@ import {
   createBackendSession,
   fetchCanvasSuggestions,
   hydrateSession,
+  logStudyEvent,
   mapApiSuggestionsToCanvasSuggestions,
   saveCanvasState,
   sendChatMessage,
@@ -163,6 +164,10 @@ function formatRelevanceScore(score: number | null | undefined) {
   }
 
   return score.toFixed(2)
+}
+
+function getOperationTypes(operations: CanvasOperation[]) {
+  return Array.from(new Set(operations.map((operation) => operation.type)))
 }
 
 function createNode(
@@ -528,15 +533,42 @@ function App() {
     }))
   }
 
+  function queueStudyEvent(
+    sessionId: string,
+    eventType: string,
+    elementName: string,
+    metadata: Record<string, unknown> = {},
+  ) {
+    void logStudyEvent(sessionId, {
+      eventType,
+      elementName,
+      metadata,
+      timestamp: new Date().toISOString(),
+    }).catch(() => undefined)
+  }
+
   function handleToggleRetrievedDocuments(messageId: string) {
     if (!activeSession) {
       return
     }
 
+    const message = activeSession.chatHistory.find((item) => item.id === messageId)
+    const isExpanded = !message?.areRetrievedDocumentsExpanded
+
     updateChatMessage(activeSession.id, messageId, (message) => ({
       ...message,
       areRetrievedDocumentsExpanded: !message.areRetrievedDocumentsExpanded,
     }))
+
+    queueStudyEvent(
+      activeSession.id,
+      isExpanded ? 'retrieved_documents_expanded' : 'retrieved_documents_collapsed',
+      'relevant-documents-toggle',
+      {
+        messageId,
+        retrievedDocumentCount: message?.retrievedDocuments?.length ?? 0,
+      },
+    )
   }
 
   async function persistCanvasForSession(
@@ -576,12 +608,21 @@ function App() {
   }
 
   function handleSwitchSession(sessionId: string) {
+    const nextSession = sessions.find((session) => session.id === sessionId)
+
     startTransition(() => {
       setActiveSessionId(sessionId)
       setSelectedNodeId(null)
       setSelectedEdgeId(null)
       storeActiveSessionId(sessionId)
     })
+
+    if (nextSession && sessionId !== activeSessionId) {
+      queueStudyEvent(sessionId, 'session_selected', 'session-list-item', {
+        title: nextSession.title,
+        previousSessionId: activeSessionId || null,
+      })
+    }
   }
 
   async function handleCreateSession(event: FormEvent<HTMLFormElement>) {
@@ -610,6 +651,10 @@ function App() {
         setWorkspaceSidebarView('sessions')
         storeActiveSessionId(hydratedSession.id)
       })
+
+      queueStudyEvent(hydratedSession.id, 'session_created', 'session-form', {
+        title: hydratedSession.title,
+      })
     } catch (error) {
       setAppError(`Could not create the session: ${normalizeErrorMessage(error)}`)
     } finally {
@@ -636,11 +681,31 @@ function App() {
   }
 
   function handleToggleAssistant() {
-    setIsAssistantOpen((currentValue) => !currentValue)
+    const nextIsOpen = !isAssistantOpen
+
+    setIsAssistantOpen(nextIsOpen)
+
+    if (activeSession) {
+      queueStudyEvent(
+        activeSession.id,
+        nextIsOpen ? 'assistant_opened' : 'assistant_closed',
+        'assistant-toggle',
+      )
+    }
   }
 
   function handleToggleAskAndMap() {
-    setIsAskAndMapEnabled((currentValue) => !currentValue)
+    const nextValue = !isAskAndMapEnabled
+
+    setIsAskAndMapEnabled(nextValue)
+
+    if (activeSession) {
+      queueStudyEvent(
+        activeSession.id,
+        nextValue ? 'ask_map_enabled' : 'ask_map_disabled',
+        'ask-map-toggle',
+      )
+    }
   }
 
   function handleToggleMode(nextMode: CanvasMode) {
@@ -697,6 +762,8 @@ function App() {
       return
     }
 
+    const edgeId = createId('edge')
+
     updateActiveSession((session) => ({
       ...session,
       canvas: {
@@ -705,7 +772,7 @@ function App() {
         edges: addEdge(
           {
             ...connection,
-            id: createId('edge'),
+            id: edgeId,
             type: 'smoothstep',
             markerEnd: { type: MarkerType.ArrowClosed },
             label: 'relates to',
@@ -714,6 +781,14 @@ function App() {
         ),
       },
     }))
+
+    queueStudyEvent(activeSession.id, 'edge_created', 'canvas-edge', {
+      edgeId,
+      sourceNodeId: connection.source,
+      targetNodeId: connection.target,
+      sourceHandle: connection.sourceHandle ?? null,
+      targetHandle: connection.targetHandle ?? null,
+    })
   }
 
   function handleReconnect(oldEdge: StudyCanvasEdge, connection: Connection) {
@@ -752,6 +827,12 @@ function App() {
     }))
 
     setSelectedNodeId(nextNode.id)
+
+    queueStudyEvent(activeSession.id, 'node_created', 'quick-add-button', {
+      nodeId: nextNode.id,
+      nodeKind: kind,
+      title: nextNode.data.title,
+    })
   }
 
   function handleDeleteSelection() {
@@ -849,6 +930,12 @@ function App() {
       for (const file of files) {
         const response = await uploadDocument(activeSession.id, file)
         uploadedFileNames.push(response.document.filename)
+
+        queueStudyEvent(activeSession.id, 'document_uploaded', 'document-upload', {
+          filename: response.document.filename,
+          mimeType: file.type || null,
+          fileSizeBytes: file.size,
+        })
       }
 
       updateSession(activeSession.id, (session) => ({
@@ -862,7 +949,11 @@ function App() {
     }
   }
 
-  async function submitChat(question: string, withCanvasPlan: boolean) {
+  async function submitChat(
+    question: string,
+    withCanvasPlan: boolean,
+    source: 'composer' | 'follow_up' = 'composer',
+  ) {
     const session = activeSession
     const trimmedQuestion = question.trim()
 
@@ -889,6 +980,12 @@ function App() {
     setIsAssistantOpen(true)
     setIsSendingMessage(true)
     setAppError(null)
+
+    queueStudyEvent(session.id, 'chat_submitted', 'chat-composer', {
+      messageLength: trimmedQuestion.length,
+      usedAskMap: withCanvasPlan,
+      source,
+    })
 
     try {
       if (hydratedCanvasRevisionsRef.current[session.id] !== session.canvas.revision) {
@@ -999,6 +1096,17 @@ ${suggestion.reason}`,
               ],
             }
           })
+
+          suggestionResponse.suggestions.forEach((suggestion) => {
+            queueStudyEvent(session.id, 'canvas_suggestion_shown', 'assistant-suggestion', {
+              suggestionId: suggestion.id,
+              title: suggestion.title,
+              operationCount: suggestion.operations.length,
+              operationTypes: Array.from(
+                new Set(suggestion.operations.map((operation) => operation.type)),
+              ),
+            })
+          })
         } catch (error) {
           updateChatMessage(session.id, suggestionStatusMessageId, (message) => ({
             ...message,
@@ -1023,18 +1131,24 @@ ${suggestion.reason}`,
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void submitChat(chatInput, isAskAndMapEnabled)
+    void submitChat(chatInput, isAskAndMapEnabled, 'composer')
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void submitChat(chatInput, isAskAndMapEnabled)
+      void submitChat(chatInput, isAskAndMapEnabled, 'composer')
     }
   }
 
   function handleFollowUp(question: string) {
-    void submitChat(question, isAskAndMapEnabled)
+    if (activeSession) {
+      queueStudyEvent(activeSession.id, 'followup_prompt_clicked', 'follow-up-chip', {
+        question,
+      })
+    }
+
+    void submitChat(question, isAskAndMapEnabled, 'follow_up')
   }
 
   function handleAcceptSuggestion(suggestionId: string) {
@@ -1085,6 +1199,12 @@ ${suggestion.reason}`,
       },
     )
 
+    queueStudyEvent(activeSession.id, 'canvas_suggestion_accepted', 'assistant-suggestion', {
+      suggestionId,
+      operationCount: suggestion.operations.length,
+      operationTypes: getOperationTypes(suggestion.operations),
+    })
+
     const addedNode = suggestion.operations.find((operation) => operation.type === 'add_node')
     setSelectedNodeId(addedNode?.type === 'add_node' ? addedNode.node.id : null)
   }
@@ -1106,6 +1226,14 @@ ${suggestion.reason}`,
       ),
       pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
     }))
+
+    const suggestion = activeSession.pendingSuggestions.find((item) => item.id === suggestionId)
+
+    queueStudyEvent(activeSession.id, 'canvas_suggestion_dismissed', 'assistant-suggestion', {
+      suggestionId,
+      operationCount: suggestion?.operations.length ?? 0,
+      operationTypes: suggestion ? getOperationTypes(suggestion.operations) : [],
+    })
   }
 
   const conceptCount = activeSession
