@@ -46,6 +46,7 @@ router.post(
       participantID,
       systemID,
       title,
+      followUpQuestions: [],
     });
 
     // Create an empty canvas document immediately so the frontend has a stable target.

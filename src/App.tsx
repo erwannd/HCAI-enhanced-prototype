@@ -239,32 +239,6 @@ function storeActiveSessionId(sessionId: string) {
   window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId)
 }
 
-function getDefaultFollowUpQuestions(title: string, latestQuestion = '') {
-  const fingerprint = `${title} ${latestQuestion}`.toLowerCase()
-
-  if (fingerprint.includes('cluster')) {
-    return [
-      'What is the difference between clustering and classification?',
-      'Why do centroids move during k-means?',
-      'How should I choose the number of clusters?',
-    ]
-  }
-
-  if (fingerprint.includes('regress')) {
-    return [
-      'What does a coefficient mean in linear regression?',
-      'Why are residuals useful?',
-      'How is regression different from correlation?',
-    ]
-  }
-
-  return [
-    'What is variance in simple terms?',
-    'How is PCA different from feature selection?',
-    'Can you walk me through a small 2D example?',
-  ]
-}
-
 function createWelcomeMessage(title: string) {
   const normalized = title.toLowerCase()
 
@@ -305,11 +279,10 @@ $$`,
   )
 }
 
-function buildFrontendSession(session: Omit<StudySession, 'followUpQuestions' | 'pendingSuggestions'>): StudySession {
+function buildFrontendSession(session: Omit<StudySession, 'pendingSuggestions'>): StudySession {
   return {
     ...session,
     chatHistory: session.chatHistory.length > 0 ? session.chatHistory : [createWelcomeMessage(session.title)],
-    followUpQuestions: getDefaultFollowUpQuestions(session.title),
     pendingSuggestions: [],
   }
 }
@@ -1003,7 +976,7 @@ function App() {
 
       updateSession(session.id, (currentSession) => ({
         ...currentSession,
-        followUpQuestions: getDefaultFollowUpQuestions(currentSession.title, trimmedQuestion),
+        followUpQuestions: response.followUpQuestions ?? [],
       }))
 
       if (withCanvasPlan) {
@@ -1728,24 +1701,26 @@ ${suggestion.reason}`,
                   ))}
                 </div>
 
-                <section className="chat-section">
-                  <div className="panel__heading-row">
-                    <h3>Follow-up prompts</h3>
-                    <span>{activeSession.followUpQuestions.length}</span>
-                  </div>
-                  <div className="chip-list">
-                    {activeSession.followUpQuestions.map((question) => (
-                      <button
-                        className="chip chip--button"
-                        key={question}
-                        type="button"
-                        onClick={() => handleFollowUp(question)}
-                      >
-                        {question}
-                      </button>
-                    ))}
-                  </div>
-                </section>
+                {activeSession.followUpQuestions.length > 0 ? (
+                  <section className="chat-section">
+                    <div className="panel__heading-row">
+                      <h3>Follow-up prompts</h3>
+                      <span>{activeSession.followUpQuestions.length}</span>
+                    </div>
+                    <div className="chip-list">
+                      {activeSession.followUpQuestions.map((question) => (
+                        <button
+                          className="chip chip--button"
+                          key={question}
+                          type="button"
+                          onClick={() => handleFollowUp(question)}
+                        >
+                          {question}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
               </div>
 
               <form className="composer" onSubmit={handleSend}>

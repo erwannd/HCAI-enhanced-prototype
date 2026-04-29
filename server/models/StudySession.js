@@ -36,6 +36,13 @@ const StudySessionSchema = new Schema(
       trim: true,
     },
 
+    // The latest backend-generated follow-up prompts shown under the assistant chat.
+    // Keeping them on the session allows the UI to restore them after a reload.
+    followUpQuestions: {
+      type: [String],
+      default: [],
+    },
+
     // Soft lifecycle flag for future filtering.
     status: {
       type: String,

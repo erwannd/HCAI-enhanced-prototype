@@ -23,6 +23,7 @@ type ApiSessionSummary = {
   participantID: string
   systemID: SystemId
   title: string
+  followUpQuestions?: string[]
   status?: string
 }
 
@@ -91,6 +92,7 @@ type DocumentsResponse = {
 type ChatResponse = {
   interaction?: ApiInteraction
   botResponse: string
+  followUpQuestions?: string[]
   retrievedDocuments?: RetrievedDocument[]
 }
 
@@ -143,7 +145,7 @@ type SuggestionResponse = {
   suggestions: ApiSuggestion[]
 }
 
-type HydratedSessionBase = Omit<StudySession, 'followUpQuestions' | 'pendingSuggestions'>
+type HydratedSessionBase = Omit<StudySession, 'pendingSuggestions'>
 
 type StudyEventPayload = {
   eventType: string
@@ -495,5 +497,6 @@ export async function hydrateSession(summary: ApiSessionSummary): Promise<Hydrat
     uploadedDocuments: documents.map((document) => document.filename),
     canvas: mapApiCanvasToCanvasState(canvas),
     chatHistory: mapApiInteractionsToChatHistory(interactions),
+    followUpQuestions: summary.followUpQuestions ?? [],
   }
 }

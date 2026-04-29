@@ -3,6 +3,7 @@ const { OpenAI } = require('openai');
 
 const CanvasState = require('../models/CanvasState');
 const Interaction = require('../models/Interaction');
+const StudySession = require('../models/StudySession');
 const confidenceCalculator = require('./confidenceCalculator');
 const retrievalService = require('./retrievalService');
 const { formatCanvasForPrompt, projectCanvasStateForPrompt } = require('../utils/canvasSerializer');
@@ -324,6 +325,133 @@ class ChatService {
     }
   }
 
+  normalizeFollowUpQuestions(rawQuestions) {
+    if (!Array.isArray(rawQuestions)) {
+      return [];
+    }
+
+    const seen = new Set();
+
+    return rawQuestions
+      .map((question) => String(question || '').trim())
+      .filter((question) => {
+        if (!question) {
+          return false;
+        }
+
+        const normalized = question.toLowerCase();
+        if (seen.has(normalized)) {
+          return false;
+        }
+
+        seen.add(normalized);
+        return true;
+      })
+      .slice(0, 3);
+  }
+
+  extractFollowUpPayload(content) {
+    if (!content || typeof content !== 'string') {
+      return { followUpQuestions: [] };
+    }
+
+    const trimmed = content.trim();
+
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+
+      if (fencedMatch?.[1]) {
+        try {
+          return JSON.parse(fencedMatch[1]);
+        } catch (fencedError) {
+          console.warn('Could not parse fenced JSON follow-up payload:', fencedError);
+        }
+      }
+
+      console.warn('Could not parse follow-up payload as JSON:', error);
+      return { followUpQuestions: [] };
+    }
+  }
+
+  async generateFollowUpQuestions({
+    historyTranscript,
+    canvasContext,
+    evidenceText,
+    userInput,
+    botResponse,
+  }) {
+    const prompt = [
+      'You are generating concise follow-up prompts for a study assistant interface.',
+      'Return only JSON that matches the requested schema.',
+      'Write at most 3 short learner-facing follow-up questions.',
+      'The questions should be concrete, specific to the latest answer, and useful as clickable next-step prompts.',
+      'Do not repeat the user question.',
+      'Do not mention the canvas, JSON, or system behavior.',
+    ].join(' ');
+
+    const responseSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        followUpQuestions: {
+          type: 'array',
+          maxItems: 3,
+          items: {
+            type: 'string',
+          },
+        },
+      },
+      required: ['followUpQuestions'],
+    };
+
+    const messages = [
+      {
+        role: 'system',
+        content: prompt,
+      },
+      {
+        role: 'system',
+        content: `Recent conversation transcript:\n${historyTranscript}`,
+      },
+      {
+        role: 'system',
+        content: `Current semantic canvas:\n${formatCanvasForPrompt(canvasContext)}`,
+      },
+      {
+        role: 'system',
+        content: `Retrieved evidence:\n${evidenceText}`,
+      },
+      {
+        role: 'system',
+        content: `Latest assistant answer:\n${botResponse}`,
+      },
+      {
+        role: 'user',
+        content: `Based on the learner's latest question "${userInput}", suggest the next follow-up questions.`,
+      },
+    ];
+
+    const client = this.getClient();
+    const completion = await client.chat.completions.create({
+      model: this.model,
+      messages,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'follow_up_question_response',
+          schema: responseSchema,
+          strict: false,
+        },
+      },
+      max_tokens: 180,
+    });
+
+    const parsed = this.extractFollowUpPayload(completion.choices[0]?.message?.content || '');
+    return this.normalizeFollowUpQuestions(parsed.followUpQuestions);
+  }
+
   buildFallbackSuggestions(userInput, assistantResponse, canvasContext) {
     const lowerFingerprint = `${userInput} ${assistantResponse}`.toLowerCase();
     let title = 'New concept';
@@ -395,6 +523,7 @@ class ChatService {
     const retrievalMethod = options.retrievalMethod || 'semantic';
     const {
       historyMessages,
+      historyTranscript,
       canvasContext,
       retrieved,
       retrievedDocuments,
@@ -416,6 +545,21 @@ class ChatService {
     });
 
     const botResponse = completion.choices[0]?.message?.content?.trim() || '';
+    let followUpQuestions = [];
+
+    try {
+      followUpQuestions = await this.generateFollowUpQuestions({
+        historyTranscript,
+        canvasContext,
+        evidenceText,
+        userInput,
+        botResponse,
+      });
+    } catch (error) {
+      console.warn('Could not generate follow-up questions:', error);
+      followUpQuestions = [];
+    }
+
     const confidenceMetrics = confidenceCalculator.calculate({
       retrievedDocs: retrieved,
       retrievalMethod,
@@ -434,9 +578,15 @@ class ChatService {
       canvasContextSnapshot: canvasContext,
     });
 
+    await StudySession.updateOne(
+      { sessionID: session.sessionID },
+      { $set: { followUpQuestions } },
+    );
+
     return {
       interaction,
       botResponse,
+      followUpQuestions,
       retrievedDocuments,
       confidenceMetrics,
       canvasContextSnapshot: canvasContext,
