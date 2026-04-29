@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react'
 import ReactFlow, {
   Background,
@@ -53,8 +54,13 @@ import type {
 
 const PARTICIPANT_STORAGE_KEY = 'hcai-enhanced-prototype-participant-id'
 const ACTIVE_SESSION_STORAGE_KEY = 'hcai-enhanced-prototype-active-session-id'
+const ASSISTANT_DISPLAY_MODE_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-display-mode'
+const ASSISTANT_SIDEBAR_WIDTH_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-sidebar-width'
+const MIN_ASSISTANT_SIDEBAR_WIDTH = 360
+const MAX_ASSISTANT_SIDEBAR_WIDTH = 760
 
 type WorkspaceSidebarView = 'sessions' | 'documents'
+type AssistantDisplayMode = 'floating' | 'sidebar' | 'fullscreen'
 
 function WorkspaceLogoIcon() {
   return (
@@ -102,6 +108,45 @@ function CloseIcon() {
     <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
       <path d="M5 5L15 15" />
       <path d="M15 5L5 15" />
+    </svg>
+  )
+}
+
+function DisplayModeIcon() {
+  return (
+    <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
+      <rect x="3" y="4" width="14" height="12" rx="2" />
+      <path d="M9.75 4V16" />
+    </svg>
+  )
+}
+
+function SidebarModeIcon() {
+  return (
+    <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
+      <rect x="3" y="4" width="14" height="12" rx="2" />
+      <path d="M8 4V16" />
+    </svg>
+  )
+}
+
+function FloatingModeIcon() {
+  return (
+    <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
+      <rect x="4.5" y="5.5" width="11" height="9" rx="1.75" />
+      <path d="M6.75 8.25H13.25" />
+      <path d="M6.75 10.25H11.25" />
+    </svg>
+  )
+}
+
+function FullscreenModeIcon() {
+  return (
+    <svg aria-hidden="true" className="icon-button__icon" viewBox="0 0 20 20">
+      <path d="M7 4H4V7" />
+      <path d="M13 4H16V7" />
+      <path d="M7 16H4V13" />
+      <path d="M13 16H16V13" />
     </svg>
   )
 }
@@ -239,6 +284,47 @@ function storeActiveSessionId(sessionId: string) {
   window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId)
 }
 
+function clampAssistantSidebarWidth(width: number) {
+  return Math.min(MAX_ASSISTANT_SIDEBAR_WIDTH, Math.max(MIN_ASSISTANT_SIDEBAR_WIDTH, width))
+}
+
+function getStoredAssistantDisplayMode(): AssistantDisplayMode {
+  if (typeof window === 'undefined') {
+    return 'floating'
+  }
+
+  const rawValue = window.localStorage.getItem(ASSISTANT_DISPLAY_MODE_STORAGE_KEY)
+  return rawValue === 'sidebar' || rawValue === 'fullscreen' ? rawValue : 'floating'
+}
+
+function storeAssistantDisplayMode(mode: AssistantDisplayMode) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(ASSISTANT_DISPLAY_MODE_STORAGE_KEY, mode)
+}
+
+function getStoredAssistantSidebarWidth() {
+  if (typeof window === 'undefined') {
+    return 440
+  }
+
+  const rawValue = Number(window.localStorage.getItem(ASSISTANT_SIDEBAR_WIDTH_STORAGE_KEY))
+  return Number.isFinite(rawValue) ? clampAssistantSidebarWidth(rawValue) : 440
+}
+
+function storeAssistantSidebarWidth(width: number) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(
+    ASSISTANT_SIDEBAR_WIDTH_STORAGE_KEY,
+    String(clampAssistantSidebarWidth(width)),
+  )
+}
+
 function createWelcomeMessage(title: string) {
   const normalized = title.toLowerCase()
 
@@ -348,6 +434,14 @@ function App() {
   const [isWorkspaceSidebarOpen, setIsWorkspaceSidebarOpen] = useState(true)
   const [workspaceSidebarView, setWorkspaceSidebarView] = useState<WorkspaceSidebarView>('sessions')
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
+  const [assistantDisplayMode, setAssistantDisplayMode] = useState<AssistantDisplayMode>(() =>
+    getStoredAssistantDisplayMode(),
+  )
+  const [isAssistantDisplayMenuOpen, setIsAssistantDisplayMenuOpen] = useState(false)
+  const [assistantSidebarWidth, setAssistantSidebarWidth] = useState(() =>
+    getStoredAssistantSidebarWidth(),
+  )
+  const [isResizingAssistantSidebar, setIsResizingAssistantSidebar] = useState(false)
   const [isAskAndMapEnabled, setIsAskAndMapEnabled] = useState(false)
   const [isAppLoading, setIsAppLoading] = useState(true)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
@@ -356,6 +450,9 @@ function App() {
   const [appError, setAppError] = useState<string | null>(null)
   const hydratedCanvasRevisionsRef = useRef<Record<string, number>>({})
   const canvasSaveTimeoutRef = useRef<number | null>(null)
+  const assistantSidebarWidthRef = useRef(assistantSidebarWidth)
+  const assistantResizeStartXRef = useRef(0)
+  const assistantResizeStartWidthRef = useRef(assistantSidebarWidth)
   const [, startTransition] = useTransition()
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
@@ -427,6 +524,42 @@ function App() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    assistantSidebarWidthRef.current = assistantSidebarWidth
+  }, [assistantSidebarWidth])
+
+  useEffect(() => {
+    if (!isResizingAssistantSidebar) {
+      return
+    }
+
+    function handlePointerMove(event: MouseEvent) {
+      const delta = assistantResizeStartXRef.current - event.clientX
+      setAssistantSidebarWidth(
+        clampAssistantSidebarWidth(assistantResizeStartWidthRef.current + delta),
+      )
+    }
+
+    function handlePointerUp() {
+      setIsResizingAssistantSidebar(false)
+      storeAssistantSidebarWidth(assistantSidebarWidthRef.current)
+
+      if (activeSession) {
+        queueStudyEvent(activeSession.id, 'assistant_sidebar_resized', 'assistant-sidebar-resizer', {
+          width: assistantSidebarWidthRef.current,
+        })
+      }
+    }
+
+    window.addEventListener('mousemove', handlePointerMove)
+    window.addEventListener('mouseup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove)
+      window.removeEventListener('mouseup', handlePointerUp)
+    }
+  }, [activeSession, isResizingAssistantSidebar])
 
   useEffect(() => {
     if (!activeSession || isAppLoading) {
@@ -657,6 +790,7 @@ function App() {
     const nextIsOpen = !isAssistantOpen
 
     setIsAssistantOpen(nextIsOpen)
+    setIsAssistantDisplayMenuOpen(false)
 
     if (activeSession) {
       queueStudyEvent(
@@ -665,6 +799,29 @@ function App() {
         'assistant-toggle',
       )
     }
+  }
+
+  function handleToggleAssistantDisplayMenu() {
+    setIsAssistantDisplayMenuOpen((currentValue) => !currentValue)
+  }
+
+  function handleChangeAssistantDisplayMode(nextMode: AssistantDisplayMode) {
+    setAssistantDisplayMode(nextMode)
+    setIsAssistantDisplayMenuOpen(false)
+    storeAssistantDisplayMode(nextMode)
+
+    if (activeSession) {
+      queueStudyEvent(activeSession.id, 'assistant_display_mode_changed', 'assistant-display-mode', {
+        mode: nextMode,
+      })
+    }
+  }
+
+  function handleAssistantSidebarResizeStart(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    assistantResizeStartXRef.current = event.clientX
+    assistantResizeStartWidthRef.current = assistantSidebarWidthRef.current
+    setIsResizingAssistantSidebar(true)
   }
 
   function handleToggleAskAndMap() {
@@ -1213,10 +1370,220 @@ ${suggestion.reason}`,
     ? activeSession.canvas.nodes.filter((node) => node.data.kind === 'concept').length
     : 0
 
+  const assistantModeOptions: Array<{
+    mode: AssistantDisplayMode
+    label: string
+    Icon: typeof SidebarModeIcon
+  }> = [
+    { mode: 'sidebar', label: 'Sidebar', Icon: SidebarModeIcon },
+    { mode: 'floating', label: 'Floating', Icon: FloatingModeIcon },
+    { mode: 'fullscreen', label: 'Full screen', Icon: FullscreenModeIcon },
+  ]
+
+  const assistantPanel = isAssistantOpen && activeSession ? (
+    <section
+      className={`panel panel--assistant assistant-window assistant-window--${assistantDisplayMode}`}
+    >
+      <div className="assistant-window__header">
+        <div>
+          <p className="eyebrow">AI Chat Assistant</p>
+          <h3>Explain, then extend the map</h3>
+        </div>
+        <div className="assistant-window__header-actions">
+          <div className="assistant-mode-switch">
+            <button
+              aria-expanded={isAssistantDisplayMenuOpen ? 'true' : 'false'}
+              aria-label="Switch chat mode"
+              className="action-button icon-button icon-button--square"
+              type="button"
+              onClick={handleToggleAssistantDisplayMenu}
+            >
+              <DisplayModeIcon />
+            </button>
+            {isAssistantDisplayMenuOpen ? (
+              <div className="assistant-mode-switch__menu">
+                {assistantModeOptions.map(({ mode, label, Icon }) => (
+                  <button
+                    className={`assistant-mode-switch__option ${
+                      assistantDisplayMode === mode ? 'is-active' : ''
+                    }`}
+                    key={mode}
+                    type="button"
+                    onClick={() => handleChangeAssistantDisplayMode(mode)}
+                  >
+                    <span className="assistant-mode-switch__option-label">
+                      <Icon />
+                      <span>{label}</span>
+                    </span>
+                    {assistantDisplayMode === mode ? <span>✓</span> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button
+            aria-label="Close assistant"
+            className="action-button icon-button icon-button--square"
+            type="button"
+            onClick={handleToggleAssistant}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      </div>
+
+      <p className="panel__copy assistant-window__copy">
+        The assistant now reads session history and the saved canvas through the backend API,
+        then proposes structured canvas edits that you explicitly accept or dismiss.
+      </p>
+
+      <div className="assistant-window__body">
+        <div className="message-list">
+          {activeSession.chatHistory.map((message) => (
+            <article
+              className={`message message--${message.role} ${
+                message.kind ? `message--${message.kind}` : ''
+              }`}
+              key={message.id}
+            >
+              <div className="message__meta">
+                <strong>
+                  {message.kind === 'suggestion'
+                    ? 'Canvas suggestion'
+                    : message.role === 'assistant'
+                      ? 'Assistant'
+                      : 'You'}
+                </strong>
+                <span>{message.createdAt}</span>
+              </div>
+              <MessageContent content={message.content} />
+              {message.role === 'assistant' && message.retrievedDocuments?.length ? (
+                <div className="message__retrieval">
+                  <button
+                    aria-expanded={message.areRetrievedDocumentsExpanded ? 'true' : 'false'}
+                    className="message__retrieval-toggle"
+                    type="button"
+                    onClick={() => handleToggleRetrievedDocuments(message.id)}
+                  >
+                    {message.areRetrievedDocumentsExpanded ? 'Hide relevant documents' : 'Relevant documents'} (
+                    {message.retrievedDocuments.length})
+                  </button>
+
+                  {message.areRetrievedDocumentsExpanded ? (
+                    <div className="message__retrieval-list">
+                      {message.retrievedDocuments.map((document: RetrievedDocument, index) => (
+                        <article
+                          className="message__retrieval-card"
+                          key={`${message.id}-${document.docName}-${document.chunkIndex ?? index}`}
+                        >
+                          <div className="message__retrieval-meta">
+                            <strong>{document.docName}</strong>
+                            <span>Relevance score: {formatRelevanceScore(document.relevanceScore)}</span>
+                          </div>
+                          <p className="message__retrieval-chunk-label">
+                            Chunk {document.chunkIndex ?? index + 1}
+                          </p>
+                          <p>{document.chunkText}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {message.kind === 'suggestion' ? (
+                <div className="message__suggestion-footer">
+                  {message.suggestionState === 'pending' ? (
+                    <>
+                      <button
+                        className="action-button action-button--primary"
+                        type="button"
+                        onClick={() => message.suggestionId && handleAcceptSuggestion(message.suggestionId)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="action-button"
+                        type="button"
+                        onClick={() => message.suggestionId && handleDismissSuggestion(message.suggestionId)}
+                      >
+                        Dismiss
+                      </button>
+                    </>
+                  ) : (
+                    <span className="chip chip--muted">
+                      {message.suggestionState === 'accepted' ? 'Accepted' : 'Dismissed'}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+
+        {activeSession.followUpQuestions.length > 0 ? (
+          <section className="chat-section">
+            <div className="panel__heading-row">
+              <h3>Follow-up prompts</h3>
+              <span>{activeSession.followUpQuestions.length}</span>
+            </div>
+            <div className="chip-list">
+              {activeSession.followUpQuestions.map((question) => (
+                <button
+                  className="chip chip--button"
+                  key={question}
+                  type="button"
+                  onClick={() => handleFollowUp(question)}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+
+      <form className="composer" onSubmit={handleSend}>
+        <textarea
+          className="text-area text-area--composer"
+          value={chatInput}
+          onChange={(event) => setChatInput(event.target.value)}
+          onKeyDown={handleComposerKeyDown}
+          placeholder="Ask about the current topic or request a suggested map update."
+          rows={4}
+        />
+        <div className="composer__actions">
+          <button
+            aria-pressed={isAskAndMapEnabled}
+            className={`action-button ${isAskAndMapEnabled ? 'is-active' : ''}`}
+            type="button"
+            onClick={handleToggleAskAndMap}
+          >
+            {isAskAndMapEnabled ? 'Ask + Map On' : 'Ask + Map Off'}
+          </button>
+          <button
+            className="action-button action-button--primary"
+            disabled={isSendingMessage || !chatInput.trim()}
+            type="button"
+            onClick={() => void submitChat(chatInput, isAskAndMapEnabled)}
+          >
+            {isSendingMessage ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </form>
+    </section>
+  ) : null
+
   return (
     <ReactFlowProvider>
       <div className="workspace">
-        <div className={`workspace__grid ${!isWorkspaceSidebarOpen ? 'workspace__grid--sidebar-closed' : ''}`}>
+        <div
+          className={`workspace__shell ${
+            isAssistantOpen && activeSession && assistantDisplayMode === 'sidebar'
+              ? 'workspace__shell--assistant-sidebar'
+              : ''
+          }`}
+        >
+          <div className={`workspace__grid ${!isWorkspaceSidebarOpen ? 'workspace__grid--sidebar-closed' : ''}`}>
           <aside className={`workspace-rail ${isWorkspaceSidebarOpen ? 'is-open' : ''}`}>
             <div className="workspace-rail__top">
               <button
@@ -1591,170 +1958,31 @@ ${suggestion.reason}`,
               </>
             )}
           </main>
+          </div>
+
+          {isAssistantOpen && activeSession && assistantDisplayMode === 'sidebar' ? (
+            <aside className="assistant-sidebar" style={{ width: `${assistantSidebarWidth}px` }}>
+              <button
+                aria-label="Resize assistant sidebar"
+                className="assistant-sidebar__resize-handle"
+                type="button"
+                onMouseDown={handleAssistantSidebarResizeStart}
+              />
+              {assistantPanel}
+            </aside>
+          ) : null}
         </div>
 
-        <div className="assistant-dock">
-          {isAssistantOpen && activeSession ? (
-            <section className="panel panel--assistant assistant-window">
-              <div className="assistant-window__header">
-                <div>
-                  <p className="eyebrow">AI Chat Assistant</p>
-                  <h3>Explain, then extend the map</h3>
-                </div>
-                <button
-                  aria-label="Close assistant"
-                  className="action-button icon-button icon-button--square"
-                  type="button"
-                  onClick={handleToggleAssistant}
-                >
-                  <CloseIcon />
-                </button>
-              </div>
+        {isAssistantOpen && activeSession && assistantDisplayMode === 'floating' ? (
+          <div className="assistant-dock">{assistantPanel}</div>
+        ) : null}
 
-              <p className="panel__copy assistant-window__copy">
-                The assistant now reads session history and the saved canvas through the backend API,
-                then proposes structured canvas edits that you explicitly accept or dismiss.
-              </p>
+        {isAssistantOpen && activeSession && assistantDisplayMode === 'fullscreen' ? (
+          <div className="assistant-fullscreen">{assistantPanel}</div>
+        ) : null}
 
-              <div className="assistant-window__body">
-                <div className="message-list">
-                  {activeSession.chatHistory.map((message) => (
-                    <article
-                      className={`message message--${message.role} ${
-                        message.kind ? `message--${message.kind}` : ''
-                      }`}
-                      key={message.id}
-                    >
-                      <div className="message__meta">
-                        <strong>
-                          {message.kind === 'suggestion'
-                            ? 'Canvas suggestion'
-                            : message.role === 'assistant'
-                              ? 'Assistant'
-                              : 'You'}
-                        </strong>
-                        <span>{message.createdAt}</span>
-                      </div>
-                      <MessageContent content={message.content} />
-                      {message.role === 'assistant' && message.retrievedDocuments?.length ? (
-                        <div className="message__retrieval">
-                          <button
-                            aria-expanded={message.areRetrievedDocumentsExpanded ? 'true' : 'false'}
-                            className="message__retrieval-toggle"
-                            type="button"
-                            onClick={() => handleToggleRetrievedDocuments(message.id)}
-                          >
-                            {message.areRetrievedDocumentsExpanded ? 'Hide relevant documents' : 'Relevant documents'}{' '}
-                            ({message.retrievedDocuments.length})
-                          </button>
-
-                          {message.areRetrievedDocumentsExpanded ? (
-                            <div className="message__retrieval-list">
-                              {message.retrievedDocuments.map((document: RetrievedDocument, index) => (
-                                <article
-                                  className="message__retrieval-card"
-                                  key={`${message.id}-${document.docName}-${document.chunkIndex ?? index}`}
-                                >
-                                  <div className="message__retrieval-meta">
-                                    <strong>{document.docName}</strong>
-                                    <span>
-                                      Relevance score: {formatRelevanceScore(document.relevanceScore)}
-                                    </span>
-                                  </div>
-                                  <p className="message__retrieval-chunk-label">
-                                    Chunk {document.chunkIndex ?? index + 1}
-                                  </p>
-                                  <p>{document.chunkText}</p>
-                                </article>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {message.kind === 'suggestion' ? (
-                        <div className="message__suggestion-footer">
-                          {message.suggestionState === 'pending' ? (
-                            <>
-                              <button
-                                className="action-button action-button--primary"
-                                type="button"
-                                onClick={() => message.suggestionId && handleAcceptSuggestion(message.suggestionId)}
-                              >
-                                Accept
-                              </button>
-                              <button
-                                className="action-button"
-                                type="button"
-                                onClick={() => message.suggestionId && handleDismissSuggestion(message.suggestionId)}
-                              >
-                                Dismiss
-                              </button>
-                            </>
-                          ) : (
-                            <span className="chip chip--muted">
-                              {message.suggestionState === 'accepted' ? 'Accepted' : 'Dismissed'}
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-
-                {activeSession.followUpQuestions.length > 0 ? (
-                  <section className="chat-section">
-                    <div className="panel__heading-row">
-                      <h3>Follow-up prompts</h3>
-                      <span>{activeSession.followUpQuestions.length}</span>
-                    </div>
-                    <div className="chip-list">
-                      {activeSession.followUpQuestions.map((question) => (
-                        <button
-                          className="chip chip--button"
-                          key={question}
-                          type="button"
-                          onClick={() => handleFollowUp(question)}
-                        >
-                          {question}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-              </div>
-
-              <form className="composer" onSubmit={handleSend}>
-                <textarea
-                  className="text-area text-area--composer"
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder="Ask about the current topic or request a suggested map update."
-                  rows={4}
-                />
-                <div className="composer__actions">
-                  <button
-                    aria-pressed={isAskAndMapEnabled}
-                    className={`action-button ${isAskAndMapEnabled ? 'is-active' : ''}`}
-                    type="button"
-                    onClick={handleToggleAskAndMap}
-                  >
-                    {isAskAndMapEnabled ? 'Ask + Map On' : 'Ask + Map Off'}
-                  </button>
-                  <button
-                    className="action-button action-button--primary"
-                    disabled={isSendingMessage || !chatInput.trim()}
-                    type="button"
-                    onClick={() => void submitChat(chatInput, isAskAndMapEnabled)}
-                  >
-                    {isSendingMessage ? 'Sending…' : 'Send'}
-                  </button>
-                </div>
-              </form>
-            </section>
-          ) : null}
-
-          {!isAssistantOpen ? (
+        {!isAssistantOpen ? (
+          <div className="assistant-dock">
             <button
               aria-label="Show assistant"
               className="action-button assistant-launcher"
@@ -1768,8 +1996,8 @@ ${suggestion.reason}`,
                 <span className="assistant-launcher__count">{activeSession.pendingSuggestions.length}</span>
               ) : null}
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </ReactFlowProvider>
   )
