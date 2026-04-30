@@ -1117,11 +1117,29 @@ function App() {
             response.botResponse,
           )
 
+          if (import.meta.env.DEV) {
+            console.groupCollapsed('[CanvasSuggestions] frontend-response')
+            console.log('sessionId', session.id)
+            console.log('userInput', trimmedQuestion)
+            console.log('assistantResponse', response.botResponse)
+            console.log('rawSuggestionResponse', suggestionResponse)
+            console.groupEnd()
+          }
+
           updateSession(session.id, (currentSession) => {
             const mappedSuggestions = mapApiSuggestionsToCanvasSuggestions(
               suggestionResponse.suggestions,
               currentSession.canvas,
             )
+
+            if (import.meta.env.DEV) {
+              console.groupCollapsed('[CanvasSuggestions] mapped-suggestions')
+              console.log('canvasRevision', currentSession.canvas.revision)
+              console.log('canvasNodes', currentSession.canvas.nodes)
+              console.log('canvasEdges', currentSession.canvas.edges)
+              console.log('mappedSuggestions', mappedSuggestions)
+              console.groupEnd()
+            }
 
             if (mappedSuggestions.length === 0) {
               return {
@@ -1293,6 +1311,15 @@ ${suggestion.reason}`,
       operationCount: suggestion.operations.length,
       operationTypes: getOperationTypes(suggestion.operations),
     })
+
+    if (import.meta.env.DEV) {
+      console.groupCollapsed('[CanvasSuggestions] accepting-suggestion')
+      console.log('sessionId', activeSession.id)
+      console.log('suggestionId', suggestionId)
+      console.log('suggestion', suggestion)
+      console.log('nextCanvas', nextCanvas)
+      console.groupEnd()
+    }
 
     const addedNode = suggestion.operations.find((operation) => operation.type === 'add_node')
     setSelectedNodeId(addedNode?.type === 'add_node' ? addedNode.node.id : null)

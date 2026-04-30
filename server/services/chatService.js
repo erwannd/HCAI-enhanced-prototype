@@ -28,6 +28,18 @@ class ChatService {
     return this.openai;
   }
 
+  isDebugLoggingEnabled() {
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  logCanvasSuggestionDebug(stage, payload) {
+    if (!this.isDebugLoggingEnabled()) {
+      return;
+    }
+
+    console.log(`[CanvasSuggestions] ${stage}\n${JSON.stringify(payload, null, 2)}`);
+  }
+
   async getRecentSessionHistory(sessionID, limit = 5) {
     const interactions = await Interaction.find({ sessionID })
       .sort({ timestamp: -1 })
@@ -699,14 +711,26 @@ class ChatService {
       max_tokens: 500,
     });
 
-    const parsed = this.extractSuggestionPayload(completion.choices[0]?.message?.content || '');
+    const rawContent = completion.choices[0]?.message?.content || '';
+    const parsed = this.extractSuggestionPayload(rawContent);
     const normalizedSuggestions = this.normalizeSuggestionOperations(parsed.suggestions, canvasContext);
+    const suggestions = normalizedSuggestions.length > 0
+      ? normalizedSuggestions
+      : this.buildFallbackSuggestions(userInput, assistantResponse, canvasContext);
+
+    this.logCanvasSuggestionDebug('backend-response', {
+      sessionID: session.sessionID,
+      userInput,
+      assistantResponse,
+      rawContent,
+      parsedSuggestions: parsed.suggestions || [],
+      normalizedSuggestions,
+      usedFallback: normalizedSuggestions.length === 0,
+      returnedSuggestions: suggestions,
+    });
 
     return {
-      suggestions:
-        normalizedSuggestions.length > 0
-          ? normalizedSuggestions
-          : this.buildFallbackSuggestions(userInput, assistantResponse, canvasContext),
+      suggestions,
     };
   }
 }
