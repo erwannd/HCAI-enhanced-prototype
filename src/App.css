@@ -978,10 +978,6 @@
   gap: 10px;
 }
 
-.assistant-window__copy {
-  margin-bottom: 16px;
-}
-
 .assistant-sidebar {
   position: relative;
   flex: 0 0 auto;

@@ -325,50 +325,9 @@ function storeAssistantSidebarWidth(width: number) {
   )
 }
 
-function createWelcomeMessage(title: string) {
-  const normalized = title.toLowerCase()
-
-  if (normalized.includes('cluster')) {
-    return createMessage(
-      'assistant',
-      `### Clustering workspace
-
-Use this space to compare clustering methods, sketch the update loop, and turn loose ideas into a concept map.
-
-- Ask for explanations in plain language.
-- Use **Ask + Map** when you want a reply plus a suggested canvas edit.`,
-    )
-  }
-
-  if (normalized.includes('regress')) {
-    return createMessage(
-      'assistant',
-      `### Regression workspace
-
-Use the canvas to separate the model ingredients from the evaluation ideas.
-
-$$
-\\hat{y} = \\beta_0 + \\beta_1 x_1 + \\dots + \\beta_p x_p
-$$`,
-    )
-  }
-
-  return createMessage(
-    'assistant',
-    `### Shared learning workspace
-
-This prototype keeps the chat and concept map side by side so a learner can build understanding instead of scrolling through one long answer.
-
-$$
-\\text{principal component} = \\arg\\max_{\\|w\\|=1} \\mathrm{Var}(Xw)
-$$`,
-  )
-}
-
 function buildFrontendSession(session: Omit<StudySession, 'pendingSuggestions'>): StudySession {
   return {
     ...session,
-    chatHistory: session.chatHistory.length > 0 ? session.chatHistory : [createWelcomeMessage(session.title)],
     pendingSuggestions: [],
   }
 }
@@ -1431,11 +1390,6 @@ ${suggestion.reason}`,
           </button>
         </div>
       </div>
-
-      <p className="panel__copy assistant-window__copy">
-        The assistant now reads session history and the saved canvas through the backend API,
-        then proposes structured canvas edits that you explicitly accept or dismiss.
-      </p>
 
       <div className="assistant-window__body">
         <div className="message-list">
