@@ -1,4 +1,3 @@
-const { randomUUID } = require('crypto');
 const { OpenAI } = require('openai');
 const { zodResponseFormat } = require('openai/helpers/zod');
 const { z } = require('zod');
@@ -17,58 +16,96 @@ const NonPlaceholderTitleSchema = NonEmptyStringSchema.refine(
   'Use a specific learner-facing title instead of a placeholder.',
 );
 
-const AddNodeOperationSchema = z.object({
-  type: z.literal('add_node'),
-  node: z.object({
-    nodeID: NonEmptyStringSchema,
-    nodeType: StudyNodeTypeSchema,
-    title: NonPlaceholderTitleSchema,
-    text: NonEmptyStringSchema.max(280),
-  }).strict(),
+const NodePayloadSchema = z.object({
+  nodeID: NonEmptyStringSchema,
+  nodeType: StudyNodeTypeSchema,
+  title: NonPlaceholderTitleSchema,
+  text: NonEmptyStringSchema.max(280),
 }).strict();
 
 const UpdateNodePatchSchema = z.object({
-  title: NonPlaceholderTitleSchema.optional(),
-  text: NonEmptyStringSchema.max(280).optional(),
-  nodeType: StudyNodeTypeSchema.optional(),
+  title: NonPlaceholderTitleSchema.nullable(),
+  text: NonEmptyStringSchema.max(280).nullable(),
+  nodeType: StudyNodeTypeSchema.nullable(),
 }).strict().refine(
-  (patch) => patch.title !== undefined || patch.text !== undefined || patch.nodeType !== undefined,
+  (patch) => patch.title !== null || patch.text !== null || patch.nodeType !== null,
   'update_node.patch must include at least one change.',
 );
 
-const UpdateNodeOperationSchema = z.object({
-  type: z.literal('update_node'),
-  nodeID: NonEmptyStringSchema,
-  patch: UpdateNodePatchSchema,
-}).strict();
-
-const DeleteNodeOperationSchema = z.object({
-  type: z.literal('delete_node'),
-  nodeID: NonEmptyStringSchema,
-}).strict();
-
-const AddEdgeOperationSchema = z.object({
-  type: z.literal('add_edge'),
-  edge: z.object({
-    edgeID: NonEmptyStringSchema,
-    sourceNodeID: NonEmptyStringSchema,
-    targetNodeID: NonEmptyStringSchema,
-    label: z.string().trim().max(80).optional(),
-  }).strict(),
-}).strict();
-
-const RemoveEdgeOperationSchema = z.object({
-  type: z.literal('remove_edge'),
+const EdgePayloadSchema = z.object({
   edgeID: NonEmptyStringSchema,
+  sourceNodeID: NonEmptyStringSchema,
+  targetNodeID: NonEmptyStringSchema,
+  label: z.string().trim().max(80).nullable(),
 }).strict();
 
-const CanvasOperationSchema = z.discriminatedUnion('type', [
-  AddNodeOperationSchema,
-  UpdateNodeOperationSchema,
-  DeleteNodeOperationSchema,
-  AddEdgeOperationSchema,
-  RemoveEdgeOperationSchema,
-]);
+const CanvasOperationSchema = z.object({
+  type: z.enum(['add_node', 'update_node', 'delete_node', 'add_edge', 'remove_edge']),
+  node: NodePayloadSchema.nullable(),
+  nodeID: NonEmptyStringSchema.nullable(),
+  patch: UpdateNodePatchSchema.nullable(),
+  edge: EdgePayloadSchema.nullable(),
+  edgeID: NonEmptyStringSchema.nullable(),
+}).strict().superRefine((operation, ctx) => {
+  if (operation.type === 'add_node') {
+    if (!operation.node) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'add_node requires node',
+        path: ['node'],
+      });
+    }
+    return;
+  }
+
+  if (operation.type === 'update_node') {
+    if (!operation.nodeID) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'update_node requires nodeID',
+        path: ['nodeID'],
+      });
+    }
+    if (!operation.patch) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'update_node requires patch',
+        path: ['patch'],
+      });
+    }
+    return;
+  }
+
+  if (operation.type === 'delete_node') {
+    if (!operation.nodeID) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'delete_node requires nodeID',
+        path: ['nodeID'],
+      });
+    }
+    return;
+  }
+
+  if (operation.type === 'add_edge') {
+    if (!operation.edge) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'add_edge requires edge',
+        path: ['edge'],
+      });
+    }
+    return;
+  }
+
+  if (operation.type === 'remove_edge' && !operation.edgeID) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'remove_edge requires edgeID',
+      path: ['edgeID'],
+    });
+  }
+});
 
 const CanvasSuggestionSchema = z.object({
   id: NonEmptyStringSchema,
@@ -217,105 +254,6 @@ class ChatService {
     ];
   }
 
-  generateNodeId(title = '') {
-    const slug = String(title || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 32);
-
-    const randomPart = randomUUID().slice(0, 8);
-
-    return `node-${slug || 'suggested'}-${randomPart}`;
-  }
-
-  generateEdgeId() {
-    const randomPart = randomUUID().slice(0, 8);
-
-    return `edge-${randomPart}`;
-  }
-
-  validateCanvasSuggestions(suggestions, canvasContext) {
-    const existingNodeIds = new Set((canvasContext.nodes || []).map((node) => node.nodeID));
-    const existingEdgeIds = new Set((canvasContext.edges || []).map((edge) => edge.edgeID));
-
-    return suggestions
-      .map((suggestion) => {
-        const addedNodeIds = new Set(
-          suggestion.operations
-            .filter((operation) => operation.type === 'add_node')
-            .map((operation) => operation.node.nodeID),
-        );
-        const localNodeIds = new Set([...existingNodeIds, ...addedNodeIds]);
-        const localEdgeIds = new Set(existingEdgeIds);
-        const operations = [];
-
-        suggestion.operations.forEach((operation) => {
-          if (operation.type === 'add_node') {
-            if (existingNodeIds.has(operation.node.nodeID)) {
-              return;
-            }
-
-            operations.push(operation);
-            return;
-          }
-
-          if (operation.type === 'update_node') {
-            if (!existingNodeIds.has(operation.nodeID)) {
-              return;
-            }
-
-            operations.push(operation);
-            return;
-          }
-
-          if (operation.type === 'delete_node') {
-            if (!existingNodeIds.has(operation.nodeID)) {
-              return;
-            }
-
-            operations.push(operation);
-            return;
-          }
-
-          if (operation.type === 'add_edge') {
-            if (
-              localEdgeIds.has(operation.edge.edgeID) ||
-              !localNodeIds.has(operation.edge.sourceNodeID) ||
-              !localNodeIds.has(operation.edge.targetNodeID)
-            ) {
-              return;
-            }
-
-            localEdgeIds.add(operation.edge.edgeID);
-            operations.push(operation);
-            return;
-          }
-
-          if (operation.type === 'remove_edge') {
-            if (!existingEdgeIds.has(operation.edgeID)) {
-              return;
-            }
-
-            operations.push(operation);
-          }
-        });
-
-        if (operations.length === 0) {
-          return null;
-        }
-
-        return {
-          id: suggestion.id,
-          title: suggestion.title,
-          summary: suggestion.summary,
-          reason: suggestion.reason,
-          operations,
-        };
-      })
-      .filter(Boolean);
-  }
-
   normalizeFollowUpQuestions(rawQuestions) {
     if (!Array.isArray(rawQuestions)) {
       return [];
@@ -443,73 +381,6 @@ class ChatService {
     return this.normalizeFollowUpQuestions(parsed.followUpQuestions);
   }
 
-  buildFallbackSuggestions(userInput, assistantResponse, canvasContext) {
-    const lowerFingerprint = `${userInput} ${assistantResponse}`.toLowerCase();
-    let title = 'New concept';
-    let text = assistantResponse.split(/[.!?]\s/)[0] || assistantResponse;
-    let label = 'extends';
-
-    if (lowerFingerprint.includes('covariance')) {
-      title = 'Covariance';
-      text = 'How two features change together across the dataset.';
-      label = 'connects to';
-    } else if (lowerFingerprint.includes('variance')) {
-      title = 'Explained Variance';
-      text = 'How much of the original data spread is captured by a component.';
-      label = 'measures';
-    } else if (lowerFingerprint.includes('component') || lowerFingerprint.includes('pca')) {
-      title = 'Principal Components';
-      text = 'New directions ordered by how much variation they explain.';
-      label = 'supports';
-    } else if (lowerFingerprint.includes('regress')) {
-      title = 'Residuals';
-      text = 'The difference between the model prediction and the observed value.';
-      label = 'evaluates';
-    } else if (lowerFingerprint.includes('cluster')) {
-      title = 'Cluster Quality';
-      text = 'A check on whether clusters are compact inside and distinct from one another.';
-      label = 'evaluates';
-    }
-
-    const nodeID = this.generateNodeId(title);
-    const operations = [
-      {
-        type: 'add_node',
-        node: {
-          nodeID,
-          nodeType: 'concept',
-          title,
-          text,
-        },
-      },
-    ];
-
-    const baseNode = (canvasContext.nodes || []).find((node) => node.nodeType === 'concept')
-      || canvasContext.nodes?.[0];
-
-    if (baseNode?.nodeID) {
-      operations.push({
-        type: 'add_edge',
-        edge: {
-          edgeID: this.generateEdgeId(),
-          sourceNodeID: baseNode.nodeID,
-          targetNodeID: nodeID,
-          label,
-        },
-      });
-    }
-
-    return [
-      {
-        id: `suggestion-${randomUUID().slice(0, 8)}`,
-        title: `Add ${title}`,
-        summary: `Capture ${title.toLowerCase()} on the map as a follow-up to this answer.`,
-        reason: 'This keeps the learner-facing map aligned with the latest explanation.',
-        operations,
-      },
-    ];
-  }
-
   async createChatTurn(session, userInput, options = {}) {
     const retrievalMethod = options.retrievalMethod || 'semantic';
     const {
@@ -613,7 +484,31 @@ class ChatService {
       'Do not use alias field names such as id, label, type, from, or to.',
       'Do not use placeholder titles like "New Concept". Use specific learner-facing titles from the answer content.',
       'If no high-quality suggestion is appropriate, return {"suggestions":[]}.',
+      'Prefer a small number of precise operations over broad decompositions.',
+      'When the canvas is empty, it is acceptable to return a single add_node suggestion.',
     ].join(' ');
+
+    const exampleResponse = {
+      suggestions: [
+        {
+          id: 'add-self-attention',
+          title: 'Add Self-Attention',
+          summary: 'Capture self-attention as a core Transformer mechanism on the map.',
+          reason: 'It is central to the explanation and helps anchor related ideas like multi-head attention.',
+          operations: [
+            {
+              type: 'add_node',
+              node: {
+                nodeID: 'node-self-attention',
+                nodeType: 'concept',
+                title: 'Self-Attention',
+                text: 'A mechanism that lets each token weigh other tokens in the same sequence to capture context and relationships.',
+              },
+            },
+          ],
+        },
+      ],
+    };
 
     const messages = [
       {
@@ -637,6 +532,10 @@ class ChatService {
         content: `Latest assistant answer:\n${assistantResponse}`,
       },
       {
+        role: 'system',
+        content: `Example valid response:\n${JSON.stringify(exampleResponse, null, 2)}`,
+      },
+      {
         role: 'user',
         content: `Based on the learner's latest question "${userInput}", propose optional canvas suggestions.`,
       },
@@ -645,7 +544,7 @@ class ChatService {
     const client = this.getClient();
     let rawContent = '';
     let parsedSuggestions = [];
-    let validatedSuggestions = [];
+    let parseError = null;
 
     try {
       const completion = await client.chat.completions.parse({
@@ -660,19 +559,15 @@ class ChatService {
 
       rawContent = completion.choices[0]?.message?.content || '';
       parsedSuggestions = completion.choices[0]?.message?.parsed?.suggestions || [];
-      validatedSuggestions = this.validateCanvasSuggestions(parsedSuggestions, canvasContext);
     } catch (error) {
+      parseError = error instanceof Error ? error.message : String(error);
       this.logCanvasSuggestionDebug('backend-parse-error', {
         sessionID: session.sessionID,
         userInput,
         assistantResponse,
-        error: error instanceof Error ? error.message : String(error),
+        error: parseError,
       });
     }
-
-    const suggestions = validatedSuggestions.length > 0
-      ? validatedSuggestions
-      : this.buildFallbackSuggestions(userInput, assistantResponse, canvasContext);
 
     this.logCanvasSuggestionDebug('backend-response', {
       sessionID: session.sessionID,
@@ -680,13 +575,12 @@ class ChatService {
       assistantResponse,
       rawContent,
       parsedSuggestions,
-      validatedSuggestions,
-      usedFallback: validatedSuggestions.length === 0,
-      returnedSuggestions: suggestions,
+      parseError,
+      returnedSuggestions: parsedSuggestions,
     });
 
     return {
-      suggestions,
+      suggestions: parsedSuggestions,
     };
   }
 }
