@@ -1,5 +1,7 @@
 const { randomUUID } = require('crypto');
 const { OpenAI } = require('openai');
+const { zodResponseFormat } = require('openai/helpers/zod');
+const { z } = require('zod');
 
 const CanvasState = require('../models/CanvasState');
 const Interaction = require('../models/Interaction');
@@ -7,6 +9,78 @@ const StudySession = require('../models/StudySession');
 const confidenceCalculator = require('./confidenceCalculator');
 const retrievalService = require('./retrievalService');
 const { formatCanvasForPrompt, projectCanvasStateForPrompt } = require('../utils/canvasSerializer');
+
+const StudyNodeTypeSchema = z.enum(['concept', 'note', 'example', 'question']);
+const NonEmptyStringSchema = z.string().trim().min(1);
+const NonPlaceholderTitleSchema = NonEmptyStringSchema.refine(
+  (value) => !['new concept', 'study note', 'worked example', 'open question'].includes(value.toLowerCase()),
+  'Use a specific learner-facing title instead of a placeholder.',
+);
+
+const AddNodeOperationSchema = z.object({
+  type: z.literal('add_node'),
+  node: z.object({
+    nodeID: NonEmptyStringSchema,
+    nodeType: StudyNodeTypeSchema,
+    title: NonPlaceholderTitleSchema,
+    text: NonEmptyStringSchema.max(280),
+  }).strict(),
+}).strict();
+
+const UpdateNodePatchSchema = z.object({
+  title: NonPlaceholderTitleSchema.optional(),
+  text: NonEmptyStringSchema.max(280).optional(),
+  nodeType: StudyNodeTypeSchema.optional(),
+}).strict().refine(
+  (patch) => patch.title !== undefined || patch.text !== undefined || patch.nodeType !== undefined,
+  'update_node.patch must include at least one change.',
+);
+
+const UpdateNodeOperationSchema = z.object({
+  type: z.literal('update_node'),
+  nodeID: NonEmptyStringSchema,
+  patch: UpdateNodePatchSchema,
+}).strict();
+
+const DeleteNodeOperationSchema = z.object({
+  type: z.literal('delete_node'),
+  nodeID: NonEmptyStringSchema,
+}).strict();
+
+const AddEdgeOperationSchema = z.object({
+  type: z.literal('add_edge'),
+  edge: z.object({
+    edgeID: NonEmptyStringSchema,
+    sourceNodeID: NonEmptyStringSchema,
+    targetNodeID: NonEmptyStringSchema,
+    label: z.string().trim().max(80).optional(),
+  }).strict(),
+}).strict();
+
+const RemoveEdgeOperationSchema = z.object({
+  type: z.literal('remove_edge'),
+  edgeID: NonEmptyStringSchema,
+}).strict();
+
+const CanvasOperationSchema = z.discriminatedUnion('type', [
+  AddNodeOperationSchema,
+  UpdateNodeOperationSchema,
+  DeleteNodeOperationSchema,
+  AddEdgeOperationSchema,
+  RemoveEdgeOperationSchema,
+]);
+
+const CanvasSuggestionSchema = z.object({
+  id: NonEmptyStringSchema,
+  title: NonEmptyStringSchema.max(120),
+  summary: NonEmptyStringSchema.max(240),
+  reason: NonEmptyStringSchema.max(240),
+  operations: z.array(CanvasOperationSchema).min(1).max(8),
+}).strict();
+
+const CanvasSuggestionResponseSchema = z.object({
+  suggestions: z.array(CanvasSuggestionSchema).max(2),
+}).strict();
 
 class ChatService {
   constructor() {
@@ -161,139 +235,69 @@ class ChatService {
     return `edge-${randomPart}`;
   }
 
-  normalizeNodeType(value) {
-    const normalized = String(value || '').toLowerCase();
-    return ['concept', 'note', 'example', 'question'].includes(normalized) ? normalized : 'concept';
-  }
-
-  normalizeSuggestionOperations(rawSuggestions, canvasContext) {
-    if (!Array.isArray(rawSuggestions)) {
-      return [];
-    }
-
+  validateCanvasSuggestions(suggestions, canvasContext) {
     const existingNodeIds = new Set((canvasContext.nodes || []).map((node) => node.nodeID));
     const existingEdgeIds = new Set((canvasContext.edges || []).map((edge) => edge.edgeID));
 
-    return rawSuggestions
-      .map((rawSuggestion, suggestionIndex) => {
-        const localNodeIds = new Set(existingNodeIds);
+    return suggestions
+      .map((suggestion) => {
+        const addedNodeIds = new Set(
+          suggestion.operations
+            .filter((operation) => operation.type === 'add_node')
+            .map((operation) => operation.node.nodeID),
+        );
+        const localNodeIds = new Set([...existingNodeIds, ...addedNodeIds]);
+        const localEdgeIds = new Set(existingEdgeIds);
         const operations = [];
 
-        const rawOperations = Array.isArray(rawSuggestion.operations) ? rawSuggestion.operations : [];
-
-        rawOperations.forEach((operation) => {
-          const type = String(operation?.type || '').trim();
-
-          if (type === 'add_node') {
-            const rawNode = operation.node || {};
-            const nodeTitle = String(rawNode.title || '').trim();
-            const nodeText = String(rawNode.text || '').trim();
-
-            if (!nodeTitle && !nodeText) {
+        suggestion.operations.forEach((operation) => {
+          if (operation.type === 'add_node') {
+            if (existingNodeIds.has(operation.node.nodeID)) {
               return;
             }
 
-            let nodeID = String(rawNode.nodeID || '').trim();
-            if (!nodeID || localNodeIds.has(nodeID)) {
-              nodeID = this.generateNodeId(nodeTitle);
-            }
-
-            localNodeIds.add(nodeID);
-
-            operations.push({
-              type: 'add_node',
-              node: {
-                nodeID,
-                nodeType: this.normalizeNodeType(rawNode.nodeType),
-                title: nodeTitle,
-                text: nodeText,
-              },
-            });
+            operations.push(operation);
             return;
           }
 
-          if (type === 'update_node') {
-            const nodeID = String(operation.nodeID || '').trim();
-            if (!nodeID || !existingNodeIds.has(nodeID)) {
+          if (operation.type === 'update_node') {
+            if (!existingNodeIds.has(operation.nodeID)) {
               return;
             }
 
-            const patch = operation.patch || {};
-            const normalizedPatch = {
-              title: typeof patch.title === 'string' ? patch.title.trim() : undefined,
-              text: typeof patch.text === 'string' ? patch.text.trim() : undefined,
-              nodeType: typeof patch.nodeType === 'string' ? this.normalizeNodeType(patch.nodeType) : undefined,
-            };
+            operations.push(operation);
+            return;
+          }
 
+          if (operation.type === 'delete_node') {
+            if (!existingNodeIds.has(operation.nodeID)) {
+              return;
+            }
+
+            operations.push(operation);
+            return;
+          }
+
+          if (operation.type === 'add_edge') {
             if (
-              normalizedPatch.title === undefined &&
-              normalizedPatch.text === undefined &&
-              normalizedPatch.nodeType === undefined
+              localEdgeIds.has(operation.edge.edgeID) ||
+              !localNodeIds.has(operation.edge.sourceNodeID) ||
+              !localNodeIds.has(operation.edge.targetNodeID)
             ) {
               return;
             }
 
-            operations.push({
-              type: 'update_node',
-              nodeID,
-              patch: normalizedPatch,
-            });
+            localEdgeIds.add(operation.edge.edgeID);
+            operations.push(operation);
             return;
           }
 
-          if (type === 'delete_node') {
-            const nodeID = String(operation.nodeID || '').trim();
-            if (!nodeID || !existingNodeIds.has(nodeID)) {
+          if (operation.type === 'remove_edge') {
+            if (!existingEdgeIds.has(operation.edgeID)) {
               return;
             }
 
-            operations.push({
-              type: 'delete_node',
-              nodeID,
-            });
-            return;
-          }
-
-          if (type === 'add_edge') {
-            const rawEdge = operation.edge || {};
-            const sourceNodeID = String(rawEdge.sourceNodeID || '').trim();
-            const targetNodeID = String(rawEdge.targetNodeID || '').trim();
-
-            if (!sourceNodeID || !targetNodeID) {
-              return;
-            }
-
-            if (!localNodeIds.has(sourceNodeID) || !localNodeIds.has(targetNodeID)) {
-              return;
-            }
-
-            let edgeID = String(rawEdge.edgeID || '').trim();
-            if (!edgeID || existingEdgeIds.has(edgeID)) {
-              edgeID = this.generateEdgeId();
-            }
-
-            operations.push({
-              type: 'add_edge',
-              edge: {
-                edgeID,
-                sourceNodeID,
-                targetNodeID,
-                label: String(rawEdge.label || '').trim(),
-              },
-            });
-            return;
-          }
-
-          if (type === 'remove_edge') {
-            const edgeID = String(operation.edgeID || '').trim();
-            if (!edgeID || !existingEdgeIds.has(edgeID)) {
-              return;
-            }
-
-            operations.push({
-              type: 'remove_edge',
-              edgeID,
-            });
+            operations.push(operation);
           }
         });
 
@@ -302,39 +306,14 @@ class ChatService {
         }
 
         return {
-          id: String(rawSuggestion.id || `suggestion-${suggestionIndex + 1}`).trim(),
-          title: String(rawSuggestion.title || 'Canvas suggestion').trim(),
-          summary: String(rawSuggestion.summary || '').trim(),
-          reason: String(rawSuggestion.reason || '').trim(),
+          id: suggestion.id,
+          title: suggestion.title,
+          summary: suggestion.summary,
+          reason: suggestion.reason,
           operations,
         };
       })
       .filter(Boolean);
-  }
-
-  extractSuggestionPayload(content) {
-    if (!content || typeof content !== 'string') {
-      return { suggestions: [] };
-    }
-
-    const trimmed = content.trim();
-
-    try {
-      return JSON.parse(trimmed);
-    } catch (error) {
-      const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-
-      if (fencedMatch?.[1]) {
-        try {
-          return JSON.parse(fencedMatch[1]);
-        } catch (fencedError) {
-          console.warn('Could not parse fenced JSON suggestion payload:', fencedError);
-        }
-      }
-
-      console.warn('Could not parse suggestion payload as JSON:', error);
-      return { suggestions: [] };
-    }
   }
 
   normalizeFollowUpQuestions(rawQuestions) {
@@ -621,53 +600,20 @@ class ChatService {
 
     const prompt = [
       'You are generating structured concept-map suggestions for a human-centered AI learning tool.',
-      'Return only JSON that matches the requested schema.',
+      'Return only JSON that matches the requested schema exactly.',
       'Do not answer the learner directly.',
       'Suggest at most 2 compact canvas suggestions.',
       'Each suggestion should be useful, grounded in the conversation, and easy for a learner to accept or reject.',
       'Use semantic canvas operations only: add_node, update_node, delete_node, add_edge, remove_edge.',
       'Prefer adding or lightly updating nodes over deleting existing learner content.',
       'When adding an edge, only connect nodes that already exist on the canvas or are also added in the same suggestion.',
+      'For add_node, always provide node.nodeID, node.nodeType, node.title, and node.text.',
+      'For add_edge, always provide edge.edgeID, edge.sourceNodeID, edge.targetNodeID, and optionally edge.label.',
+      'For update_node, always provide nodeID and patch with one or more of title, text, or nodeType.',
+      'Do not use alias field names such as id, label, type, from, or to.',
+      'Do not use placeholder titles like "New Concept". Use specific learner-facing titles from the answer content.',
+      'If no high-quality suggestion is appropriate, return {"suggestions":[]}.',
     ].join(' ');
-
-    const responseSchema = {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        suggestions: {
-          type: 'array',
-          maxItems: 2,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              id: { type: 'string' },
-              title: { type: 'string' },
-              summary: { type: 'string' },
-              reason: { type: 'string' },
-              operations: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  additionalProperties: true,
-                  properties: {
-                    type: { type: 'string' },
-                    node: { type: 'object' },
-                    nodeID: { type: 'string' },
-                    patch: { type: 'object' },
-                    edge: { type: 'object' },
-                    edgeID: { type: 'string' },
-                  },
-                  required: ['type'],
-                },
-              },
-            },
-            required: ['title', 'summary', 'reason', 'operations'],
-          },
-        },
-      },
-      required: ['suggestions'],
-    };
 
     const messages = [
       {
@@ -697,25 +643,35 @@ class ChatService {
     ];
 
     const client = this.getClient();
-    const completion = await client.chat.completions.create({
-      model: this.model,
-      messages,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'canvas_suggestion_response',
-          schema: responseSchema,
-          strict: false,
-        },
-      },
-      max_tokens: 500,
-    });
+    let rawContent = '';
+    let parsedSuggestions = [];
+    let validatedSuggestions = [];
 
-    const rawContent = completion.choices[0]?.message?.content || '';
-    const parsed = this.extractSuggestionPayload(rawContent);
-    const normalizedSuggestions = this.normalizeSuggestionOperations(parsed.suggestions, canvasContext);
-    const suggestions = normalizedSuggestions.length > 0
-      ? normalizedSuggestions
+    try {
+      const completion = await client.chat.completions.parse({
+        model: this.model,
+        messages,
+        response_format: zodResponseFormat(
+          CanvasSuggestionResponseSchema,
+          'canvas_suggestion_response',
+        ),
+        max_tokens: 500,
+      });
+
+      rawContent = completion.choices[0]?.message?.content || '';
+      parsedSuggestions = completion.choices[0]?.message?.parsed?.suggestions || [];
+      validatedSuggestions = this.validateCanvasSuggestions(parsedSuggestions, canvasContext);
+    } catch (error) {
+      this.logCanvasSuggestionDebug('backend-parse-error', {
+        sessionID: session.sessionID,
+        userInput,
+        assistantResponse,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const suggestions = validatedSuggestions.length > 0
+      ? validatedSuggestions
       : this.buildFallbackSuggestions(userInput, assistantResponse, canvasContext);
 
     this.logCanvasSuggestionDebug('backend-response', {
@@ -723,9 +679,9 @@ class ChatService {
       userInput,
       assistantResponse,
       rawContent,
-      parsedSuggestions: parsed.suggestions || [],
-      normalizedSuggestions,
-      usedFallback: normalizedSuggestions.length === 0,
+      parsedSuggestions,
+      validatedSuggestions,
+      usedFallback: validatedSuggestions.length === 0,
       returnedSuggestions: suggestions,
     });
 

@@ -215,7 +215,8 @@
   flex-direction: column;
   gap: 18px;
   padding: 18px 12px;
-  height: 100svh;
+  height: auto;
+  min-height: 100%;
   border: 1px solid rgba(20, 73, 76, 0.12);
   border-left: none;
   border-top: none;
@@ -980,8 +981,16 @@
 
 .assistant-sidebar {
   position: relative;
+  display: flex;
   flex: 0 0 auto;
   min-width: 0;
+  min-height: 100%;
+  align-self: stretch;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.94), rgba(244, 239, 226, 0.92)),
+    var(--paper);
+  border-left: 1px solid rgba(20, 73, 76, 0.12);
+  box-shadow: 0 12px 28px rgba(7, 33, 36, 0.06);
 }
 
 .assistant-sidebar__resize-handle {
