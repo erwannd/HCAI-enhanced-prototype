@@ -119,6 +119,147 @@ const CanvasSuggestionResponseSchema = z.object({
   suggestions: z.array(CanvasSuggestionSchema).max(2),
 }).strict();
 
+const SUGGESTION_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'by',
+  'for',
+  'from',
+  'in',
+  'into',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+  'add',
+  'connect',
+  'link',
+  'node',
+  'nodes',
+  'edge',
+  'edges',
+  'concept',
+  'concepts',
+  'difference',
+  'detailed',
+  'detail',
+  'clarity',
+  'show',
+  'highlight',
+  'relationship',
+  'roles',
+  'role',
+  'map',
+  'canvas',
+  'update',
+]);
+
+function normalizeSuggestionText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !SUGGESTION_STOP_WORDS.has(token));
+}
+
+function getSuggestionKeywords(suggestion) {
+  return new Set(
+    normalizeSuggestionText(
+      `${suggestion.title || ''} ${suggestion.summary || ''} ${suggestion.reason || ''}`,
+    ),
+  );
+}
+
+function countNodeAdditions(suggestion) {
+  return suggestion.operations.filter((operation) => operation.type === 'add_node').length;
+}
+
+function countEdgeAdditions(suggestion) {
+  return suggestion.operations.filter((operation) => operation.type === 'add_edge').length;
+}
+
+function getSuggestionPrimaryNodeIds(suggestion) {
+  return new Set(
+    suggestion.operations
+      .filter((operation) => operation.type === 'add_node' && operation.node?.nodeID)
+      .map((operation) => operation.node.nodeID),
+  );
+}
+
+function dedupeOperations(operations) {
+  const seen = new Set();
+
+  return operations.filter((operation) => {
+    const key = JSON.stringify(operation);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeSuggestionPair(primarySuggestion, secondarySuggestion) {
+  const mergedOperations = dedupeOperations([
+    ...primarySuggestion.operations,
+    ...secondarySuggestion.operations,
+  ]).slice(0, 8);
+
+  const mergedSummary = `${primarySuggestion.summary} ${secondarySuggestion.summary}`.trim();
+  const mergedReason = `${primarySuggestion.reason} ${secondarySuggestion.reason}`.trim();
+
+  return {
+    id: primarySuggestion.id,
+    title: primarySuggestion.title,
+    summary: mergedSummary.length <= 240
+      ? mergedSummary
+      : primarySuggestion.summary,
+    reason: mergedReason.length <= 240
+      ? mergedReason
+      : primarySuggestion.reason,
+    operations: mergedOperations,
+  };
+}
+
+function shouldMergeSuggestions(primarySuggestion, secondarySuggestion, canvasNodeIds) {
+  const primaryKeywords = getSuggestionKeywords(primarySuggestion);
+  const secondaryKeywords = getSuggestionKeywords(secondarySuggestion);
+  const sharedKeywords = [...primaryKeywords].filter((keyword) => secondaryKeywords.has(keyword));
+  const primaryNodeIds = getSuggestionPrimaryNodeIds(primarySuggestion);
+  const secondaryNodeIds = getSuggestionPrimaryNodeIds(secondarySuggestion);
+  const secondaryEdgeTargets = secondarySuggestion.operations
+    .filter((operation) => operation.type === 'add_edge' && operation.edge)
+    .map((operation) => operation.edge);
+
+  const primaryEdgeTargets = primarySuggestion.operations
+    .filter((operation) => operation.type === 'add_edge' && operation.edge)
+    .map((operation) => operation.edge);
+
+  const secondaryDependsOnPrimaryNodes = secondaryEdgeTargets.some((edge) =>
+    primaryNodeIds.has(edge.sourceNodeID) || primaryNodeIds.has(edge.targetNodeID),
+  );
+  const primaryDependsOnSecondaryNodes = primaryEdgeTargets.some((edge) =>
+    secondaryNodeIds.has(edge.sourceNodeID) || secondaryNodeIds.has(edge.targetNodeID),
+  );
+
+  const secondaryIsConnector = countNodeAdditions(secondarySuggestion) === 0 && countEdgeAdditions(secondarySuggestion) > 0;
+  const primaryIsConnector = countNodeAdditions(primarySuggestion) === 0 && countEdgeAdditions(primarySuggestion) > 0;
+  const mentionsExistingCanvasNodes = [...primaryNodeIds, ...secondaryNodeIds].some((nodeID) => canvasNodeIds.has(nodeID));
+
+  return (
+    secondaryDependsOnPrimaryNodes ||
+    primaryDependsOnSecondaryNodes ||
+    (sharedKeywords.length >= 2 && (secondaryIsConnector || primaryIsConnector) && !mentionsExistingCanvasNodes)
+  );
+}
+
 class ChatService {
   constructor() {
     this.model = 'gpt-4.1-mini';
@@ -149,6 +290,42 @@ class ChatService {
     }
 
     console.log(`[CanvasSuggestions] ${stage}\n${JSON.stringify(payload, null, 2)}`);
+  }
+
+  mergeRelatedCanvasSuggestions(suggestions, canvasContext) {
+    if (!Array.isArray(suggestions) || suggestions.length <= 1) {
+      return Array.isArray(suggestions) ? suggestions : [];
+    }
+
+    const canvasNodeIds = new Set((canvasContext?.nodes || []).map((node) => node.nodeID));
+    const sortedSuggestions = [...suggestions].sort((left, right) => {
+      const leftNodeAdds = countNodeAdditions(left);
+      const rightNodeAdds = countNodeAdditions(right);
+
+      if (leftNodeAdds !== rightNodeAdds) {
+        return rightNodeAdds - leftNodeAdds;
+      }
+
+      return countEdgeAdditions(left) - countEdgeAdditions(right);
+    });
+
+    const mergedSuggestions = [];
+
+    for (const suggestion of sortedSuggestions) {
+      const mergeTarget = mergedSuggestions.find((candidate) =>
+        shouldMergeSuggestions(candidate, suggestion, canvasNodeIds),
+      );
+
+      if (mergeTarget) {
+        const nextMerged = mergeSuggestionPair(mergeTarget, suggestion);
+        mergedSuggestions[mergedSuggestions.indexOf(mergeTarget)] = nextMerged;
+        continue;
+      }
+
+      mergedSuggestions.push(suggestion);
+    }
+
+    return mergedSuggestions.slice(0, 2);
   }
 
   async getRecentSessionHistory(sessionID, limit = 5) {
@@ -474,10 +651,15 @@ class ChatService {
       'Return only JSON that matches the requested schema exactly.',
       'Do not answer the learner directly.',
       'Suggest at most 2 compact canvas suggestions.',
+      'Prefer returning 1 coherent suggestion when multiple operations belong to the same conceptual update.',
+      'Do not split dependent edits across separate suggestions.',
+      'If one suggestion adds or updates nodes and another suggestion would only connect, label, or refine those same concepts, combine them into a single suggestion.',
+      'If you return multiple suggestions, each one must be independently useful and must still make sense if the learner rejects the others.',
       'Each suggestion should be useful, grounded in the conversation, and easy for a learner to accept or reject.',
       'Use semantic canvas operations only: add_node, update_node, delete_node, add_edge, remove_edge.',
       'Prefer adding or lightly updating nodes over deleting existing learner content.',
       'When adding an edge, only connect nodes that already exist on the canvas or are also added in the same suggestion.',
+      'Make titles, summaries, reasons, and operations agree with each other exactly.',
       'For add_node, always provide node.nodeID, node.nodeType, node.title, and node.text.',
       'For add_edge, always provide edge.edgeID, edge.sourceNodeID, edge.targetNodeID, and optionally edge.label.',
       'For update_node, always provide nodeID and patch with one or more of title, text, or nodeType.',
@@ -544,6 +726,7 @@ class ChatService {
     const client = this.getClient();
     let rawContent = '';
     let parsedSuggestions = [];
+    let originalParsedSuggestions = [];
     let parseError = null;
 
     try {
@@ -554,11 +737,12 @@ class ChatService {
           CanvasSuggestionResponseSchema,
           'canvas_suggestion_response',
         ),
-        max_tokens: 500,
+        max_tokens: 1100,
       });
 
       rawContent = completion.choices[0]?.message?.content || '';
-      parsedSuggestions = completion.choices[0]?.message?.parsed?.suggestions || [];
+      originalParsedSuggestions = completion.choices[0]?.message?.parsed?.suggestions || [];
+      parsedSuggestions = this.mergeRelatedCanvasSuggestions(originalParsedSuggestions, canvasContext);
     } catch (error) {
       parseError = error instanceof Error ? error.message : String(error);
       this.logCanvasSuggestionDebug('backend-parse-error', {
@@ -574,7 +758,8 @@ class ChatService {
       userInput,
       assistantResponse,
       rawContent,
-      parsedSuggestions,
+      parsedSuggestions: originalParsedSuggestions,
+      bundledSuggestions: parsedSuggestions,
       parseError,
       returnedSuggestions: parsedSuggestions,
     });

@@ -857,12 +857,15 @@
 .canvas-node h4 {
   margin: 12px 0 8px;
   font-size: 1.05rem;
+  overflow-wrap: anywhere;
 }
 
 .canvas-node p {
   color: var(--ink-subtle);
   font-size: 0.94rem;
   line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .canvas-node__handle {

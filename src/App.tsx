@@ -40,6 +40,7 @@ import {
 } from './api'
 import { CanvasNodeCard } from './components/CanvasNode'
 import { MessageContent } from './components/MessageContent'
+import { applyAutoNodeSize, createAutoSizedNode } from './canvas-layout'
 import { CanvasModeContext } from './canvas-mode'
 import type {
   CanvasMode,
@@ -222,15 +223,13 @@ function createNode(
   title: string,
   text: string,
 ): StudyCanvasNode {
-  return {
+  return createAutoSizedNode({
     id: createId('node'),
-    type: 'study',
+    kind,
     position: { x, y },
-    width: 250,
-    height: 166,
-    style: { width: 250, height: 166 },
-    data: { kind, title, text },
-  }
+    title,
+    text,
+  })
 }
 
 function normalizeErrorMessage(error: unknown) {
@@ -342,7 +341,7 @@ function applyCanvasOperations(
 
   for (const operation of operations) {
     if (operation.type === 'add_node') {
-      nextNodes = [...nextNodes, operation.node]
+      nextNodes = [...nextNodes, applyAutoNodeSize(operation.node)]
       continue
     }
 
@@ -357,7 +356,7 @@ function applyCanvasOperations(
     if (operation.type === 'update_node') {
       nextNodes = nextNodes.map((node) =>
         node.id === operation.nodeId
-          ? {
+          ? applyAutoNodeSize({
               ...node,
               position: operation.patch.position ?? node.position,
               style: operation.patch.style ? { ...node.style, ...operation.patch.style } : node.style,
@@ -365,7 +364,7 @@ function applyCanvasOperations(
                 ...node.data,
                 ...(operation.patch.data ?? {}),
               },
-            }
+            })
           : node,
       )
       continue
@@ -967,13 +966,13 @@ function App() {
         revision: session.canvas.revision + 1,
         nodes: session.canvas.nodes.map((node) =>
           node.id === selectedNode.id
-            ? {
+            ? applyAutoNodeSize({
                 ...node,
                 data: {
                   ...node.data,
                   [field]: value,
                 },
-              }
+              })
             : node,
         ),
       },

@@ -1,4 +1,5 @@
 import { MarkerType, type Edge, type Node } from 'reactflow'
+import { applyAutoNodeSize, createAutoSizedNode } from './canvas-layout'
 import type {
   CanvasMode,
   CanvasOperation,
@@ -187,25 +188,28 @@ function formatMessageTime(timestamp?: string) {
 }
 
 function mapApiNodeToReactFlowNode(node: ApiCanvasNode): Node {
-  const width = node.width ?? 250
-  const height = node.height ?? 166
-
-  return {
+  return applyAutoNodeSize({
     id: node.nodeID,
     type: 'study',
     position: {
       x: node.x ?? 0,
       y: node.y ?? 0,
     },
-    width,
-    height,
-    style: { width, height },
+    width: node.width ?? undefined,
+    height: node.height ?? undefined,
+    style:
+      node.width || node.height
+        ? {
+            ...(node.width ? { width: node.width } : {}),
+            ...(node.height ? { height: node.height } : {}),
+          }
+        : undefined,
     data: {
       kind: node.nodeType,
       title: node.title,
       text: node.text,
     },
-  }
+  })
 }
 
 function mapApiEdgeToReactFlowEdge(edge: ApiCanvasEdge): Edge {
@@ -241,19 +245,13 @@ function mapApiSuggestionOperationToCanvasOperation(
 
     return {
       type: 'add_node',
-      node: {
+      node: createAutoSizedNode({
         id: operation.node.nodeID,
-        type: 'study',
+        kind: operation.node.nodeType,
         position: placement,
-        width: 250,
-        height: 166,
-        style: { width: 250, height: 166 },
-        data: {
-          kind: operation.node.nodeType,
-          title: operation.node.title,
-          text: operation.node.text,
-        },
-      },
+        title: operation.node.title,
+        text: operation.node.text,
+      }),
     }
   }
 
