@@ -1062,6 +1062,7 @@ function App() {
 
     updateSession(session.id, (currentSession) => ({
       ...currentSession,
+      followUpQuestions: [],
       chatHistory: [...currentSession.chatHistory, userMessage, pendingAnswerMessage],
     }))
 
