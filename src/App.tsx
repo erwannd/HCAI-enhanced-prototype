@@ -62,6 +62,8 @@ const MAX_ASSISTANT_SIDEBAR_WIDTH = 760
 
 type WorkspaceSidebarView = 'sessions' | 'documents'
 type AssistantDisplayMode = 'floating' | 'sidebar' | 'fullscreen'
+type InspectorModalState = { kind: 'node' | 'edge'; id: string }
+type CanvasHoverHint = { x: number; y: number; text: string }
 
 function WorkspaceLogoIcon() {
   return (
@@ -400,6 +402,8 @@ function App() {
     getStoredAssistantSidebarWidth(),
   )
   const [isResizingAssistantSidebar, setIsResizingAssistantSidebar] = useState(false)
+  const [inspectorModal, setInspectorModal] = useState<InspectorModalState | null>(null)
+  const [canvasHoverHint, setCanvasHoverHint] = useState<CanvasHoverHint | null>(null)
   const [isAskAndMapEnabled, setIsAskAndMapEnabled] = useState(false)
   const [isAppLoading, setIsAppLoading] = useState(true)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
@@ -423,6 +427,15 @@ function App() {
     activeSession?.canvas.edges.find((edge) => edge.id === selectedEdgeId) ??
     activeSession?.canvas.edges.find((edge) => edge.selected) ??
     null
+  const modalNode =
+    inspectorModal?.kind === 'node'
+      ? activeSession?.canvas.nodes.find((node) => node.id === inspectorModal.id) ?? null
+      : null
+  const modalEdge =
+    inspectorModal?.kind === 'edge'
+      ? activeSession?.canvas.edges.find((edge) => edge.id === inspectorModal.id) ?? null
+      : null
+  const hasSelection = Boolean(selectedNode || selectedEdge)
 
   useEffect(() => {
     let isCancelled = false
@@ -487,6 +500,41 @@ function App() {
   useEffect(() => {
     assistantSidebarWidthRef.current = assistantSidebarWidth
   }, [assistantSidebarWidth])
+
+  useEffect(() => {
+    if (!inspectorModal) {
+      return
+    }
+
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
+      setInspectorModal(null)
+      return
+    }
+
+    if (inspectorModal.kind === 'node' && !modalNode) {
+      setInspectorModal(null)
+      return
+    }
+
+    if (inspectorModal.kind === 'edge' && !modalEdge) {
+      setInspectorModal(null)
+    }
+  }, [activeSession, inspectorModal, modalEdge, modalNode])
+
+  useEffect(() => {
+    if (!inspectorModal) {
+      return
+    }
+
+    function handleEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setInspectorModal(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [inspectorModal])
 
   useEffect(() => {
     if (!isResizingAssistantSidebar) {
@@ -844,6 +892,55 @@ function App() {
   function handleSelectionChange({ nodes, edges }: OnSelectionChangeParams) {
     setSelectedNodeId(nodes[0]?.id ?? null)
     setSelectedEdgeId(edges[0]?.id ?? null)
+  }
+
+  function openInspectorForSelection() {
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
+      return
+    }
+
+    if (selectedNode) {
+      setInspectorModal({ kind: 'node', id: selectedNode.id })
+      return
+    }
+
+    if (selectedEdge) {
+      setInspectorModal({ kind: 'edge', id: selectedEdge.id })
+    }
+  }
+
+  function handleNodeDoubleClick(nodeId: string) {
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
+      return
+    }
+
+    clearCanvasHoverHint()
+    setSelectedNodeId(nodeId)
+    setSelectedEdgeId(null)
+    setInspectorModal({ kind: 'node', id: nodeId })
+  }
+
+  function handleEdgeDoubleClick(edgeId: string) {
+    if (!activeSession || activeSession.canvas.mode !== 'edit') {
+      return
+    }
+
+    clearCanvasHoverHint()
+    setSelectedEdgeId(edgeId)
+    setSelectedNodeId(null)
+    setInspectorModal({ kind: 'edge', id: edgeId })
+  }
+
+  function handleCanvasHoverHint(x: number, y: number, text = 'Double-click to edit') {
+    if (!activeSession || activeSession.canvas.mode !== 'edit' || inspectorModal) {
+      return
+    }
+
+    setCanvasHoverHint({ x, y, text })
+  }
+
+  function clearCanvasHoverHint() {
+    setCanvasHoverHint(null)
   }
 
   function handleConnect(connection: Connection) {
@@ -1364,10 +1461,6 @@ ${suggestion.reason}`,
     })
   }
 
-  const conceptCount = activeSession
-    ? activeSession.canvas.nodes.filter((node) => node.data.kind === 'concept').length
-    : 0
-
   const assistantModeOptions: Array<{
     mode: AssistantDisplayMode
     label: string
@@ -1775,24 +1868,6 @@ ${suggestion.reason}`,
                         Edit
                       </button>
                     </div>
-                    <button className="action-button" type="button" onClick={handleDeleteSelection}>
-                      Remove selection
-                    </button>
-                  </div>
-                </div>
-
-                <div className="canvas-metrics">
-                  <div>
-                    <span>Revision</span>
-                    <strong>{activeSession.canvas.revision}</strong>
-                  </div>
-                  <div>
-                    <span>Concepts</span>
-                    <strong>{conceptCount}</strong>
-                  </div>
-                  <div>
-                    <span>Pending AI suggestions</span>
-                    <strong>{activeSession.pendingSuggestions.length}</strong>
                   </div>
                 </div>
 
@@ -1808,6 +1883,24 @@ ${suggestion.reason}`,
                       Add {kindLabels[kind]}
                     </button>
                   ))}
+                  <div className="canvas-toolbar__selection-actions">
+                    <button
+                      className="action-button"
+                      disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
+                      type="button"
+                      onClick={openInspectorForSelection}
+                    >
+                      Edit selection
+                    </button>
+                    <button
+                      className="action-button"
+                      disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
+                      type="button"
+                      onClick={handleDeleteSelection}
+                    >
+                      Remove selection
+                    </button>
+                  </div>
                 </div>
 
                 <div className="canvas-stage">
@@ -1830,11 +1923,31 @@ ${suggestion.reason}`,
                       onConnect={handleConnect}
                       onReconnect={handleReconnect}
                       onSelectionChange={handleSelectionChange}
-                      nodesDraggable={activeSession.canvas.mode === 'edit'}
-                      nodesConnectable={activeSession.canvas.mode === 'edit'}
-                      edgesUpdatable={activeSession.canvas.mode === 'edit'}
+                      onNodeDoubleClick={(_, node) => handleNodeDoubleClick(node.id)}
+                      onEdgeDoubleClick={(_, edge) => handleEdgeDoubleClick(edge.id)}
+                      onNodeMouseEnter={(event) =>
+                        handleCanvasHoverHint(event.clientX, event.clientY)
+                      }
+                      onNodeMouseMove={(event) =>
+                        handleCanvasHoverHint(event.clientX, event.clientY)
+                      }
+                      onNodeMouseLeave={clearCanvasHoverHint}
+                      onEdgeMouseEnter={(event) =>
+                        handleCanvasHoverHint(event.clientX, event.clientY)
+                      }
+                      onEdgeMouseMove={(event) =>
+                        handleCanvasHoverHint(event.clientX, event.clientY)
+                      }
+                      onEdgeMouseLeave={clearCanvasHoverHint}
+                      nodesDraggable={activeSession.canvas.mode === 'edit' && !inspectorModal}
+                      nodesConnectable={activeSession.canvas.mode === 'edit' && !inspectorModal}
+                      edgesUpdatable={activeSession.canvas.mode === 'edit' && !inspectorModal}
                       reconnectRadius={24}
-                      elementsSelectable
+                      elementsSelectable={!inspectorModal}
+                      panOnDrag={!inspectorModal}
+                      zoomOnScroll={!inspectorModal}
+                      zoomOnPinch={!inspectorModal}
+                      zoomOnDoubleClick={!inspectorModal}
                     >
                       <Background
                         color="rgba(20, 73, 76, 0.12)"
@@ -1852,103 +1965,6 @@ ${suggestion.reason}`,
                     </ReactFlow>
                   </CanvasModeContext>
                 </div>
-
-                <section className="inspector">
-                  <div className="inspector__header">
-                    <div>
-                      <p className="eyebrow">Inspector</p>
-                      <h3>
-                        {selectedNode
-                          ? selectedNode.data.title
-                          : selectedEdge
-                            ? typeof selectedEdge.label === 'string' && selectedEdge.label
-                              ? selectedEdge.label
-                              : 'Selected edge'
-                            : 'Select a node or edge'}
-                      </h3>
-                    </div>
-                    {selectedNode ? (
-                      <span className="chip chip--muted">{kindLabels[selectedNode.data.kind]}</span>
-                    ) : selectedEdge ? (
-                      <span className="chip chip--muted">Edge</span>
-                    ) : null}
-                  </div>
-
-                  {selectedNode ? (
-                    <div className="inspector__form">
-                      <label>
-                        Title
-                        <input
-                          className="text-input"
-                          disabled={activeSession.canvas.mode !== 'edit'}
-                          value={selectedNode.data.title}
-                          onChange={(event) => updateSelectedNodeField('title', event.target.value)}
-                        />
-                      </label>
-                      <label>
-                        Details
-                        <textarea
-                          className="text-area"
-                          disabled={activeSession.canvas.mode !== 'edit'}
-                          rows={4}
-                          value={selectedNode.data.text}
-                          onChange={(event) => updateSelectedNodeField('text', event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  ) : selectedEdge ? (
-                    <div className="inspector__form">
-                      <label>
-                        Edge Label
-                        <input
-                          className="text-input"
-                          disabled={activeSession.canvas.mode !== 'edit'}
-                          value={typeof selectedEdge.label === 'string' ? selectedEdge.label : ''}
-                          onChange={(event) => updateSelectedEdgeField('label', event.target.value)}
-                        />
-                      </label>
-                      <label>
-                        From Node
-                        <select
-                          className="text-input"
-                          disabled={activeSession.canvas.mode !== 'edit'}
-                          value={selectedEdge.source}
-                          onChange={(event) => updateSelectedEdgeField('source', event.target.value)}
-                        >
-                          {activeSession.canvas.nodes.map((node) => (
-                            <option key={node.id} value={node.id}>
-                              {node.data.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        To Node
-                        <select
-                          className="text-input"
-                          disabled={activeSession.canvas.mode !== 'edit'}
-                          value={selectedEdge.target}
-                          onChange={(event) => updateSelectedEdgeField('target', event.target.value)}
-                        >
-                          {activeSession.canvas.nodes.map((node) => (
-                            <option key={node.id} value={node.id}>
-                              {node.data.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <p className="panel__copy">
-                        Drag either endpoint of a selected edge on the canvas to reconnect it to a
-                        different side or node.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="panel__copy">
-                      Select a node to edit its content, or select an edge to rename it and change where
-                      it connects. In View Mode the inspector stays readable, but fields are locked.
-                    </p>
-                  )}
-                </section>
               </>
             )}
           </main>
@@ -1990,6 +2006,127 @@ ${suggestion.reason}`,
                 <span className="assistant-launcher__count">{activeSession.pendingSuggestions.length}</span>
               ) : null}
             </button>
+          </div>
+        ) : null}
+        {canvasHoverHint ? (
+          <div
+            className="canvas-hover-hint"
+            style={{
+              left: `${canvasHoverHint.x + 14}px`,
+              top: `${canvasHoverHint.y + 16}px`,
+            }}
+          >
+            {canvasHoverHint.text}
+          </div>
+        ) : null}
+        {activeSession && inspectorModal && (modalNode || modalEdge) ? (
+          <div className="inspector-modal-backdrop" role="presentation">
+            <section
+              aria-labelledby="inspector-modal-title"
+              aria-modal="true"
+              className="inspector-modal"
+              role="dialog"
+            >
+              <div className="inspector-modal__header">
+                <div>
+                  <p className="eyebrow">Inspector</p>
+                  <h3 id="inspector-modal-title">
+                    {modalNode
+                      ? modalNode.data.title
+                      : typeof modalEdge?.label === 'string' && modalEdge.label
+                        ? modalEdge.label
+                        : 'Selected edge'}
+                  </h3>
+                </div>
+                <div className="inspector-modal__header-actions">
+                  {modalNode ? (
+                    <span className="chip chip--muted">{kindLabels[modalNode.data.kind]}</span>
+                  ) : (
+                    <span className="chip chip--muted">Edge</span>
+                  )}
+                  <button
+                    className="action-button icon-button icon-button--square"
+                    type="button"
+                    onClick={() => setInspectorModal(null)}
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+
+              {modalNode ? (
+                <div className="inspector-modal__form">
+                  <label>
+                    Title
+                    <input
+                      autoFocus
+                      className="text-input"
+                      value={modalNode.data.title}
+                      onChange={(event) => updateSelectedNodeField('title', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Details
+                    <textarea
+                      className="text-area"
+                      rows={6}
+                      value={modalNode.data.text}
+                      onChange={(event) => updateSelectedNodeField('text', event.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : modalEdge ? (
+                <div className="inspector-modal__form">
+                  <label>
+                    Edge Label
+                    <input
+                      autoFocus
+                      className="text-input"
+                      value={typeof modalEdge.label === 'string' ? modalEdge.label : ''}
+                      onChange={(event) => updateSelectedEdgeField('label', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    From Node
+                    <select
+                      className="text-input"
+                      value={modalEdge.source}
+                      onChange={(event) => updateSelectedEdgeField('source', event.target.value)}
+                    >
+                      {activeSession.canvas.nodes.map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {node.data.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    To Node
+                    <select
+                      className="text-input"
+                      value={modalEdge.target}
+                      onChange={(event) => updateSelectedEdgeField('target', event.target.value)}
+                    >
+                      {activeSession.canvas.nodes.map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {node.data.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="panel__copy">
+                    Drag either endpoint of a selected edge on the canvas to reconnect it to a
+                    different side or node.
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="inspector-modal__footer">
+                <button className="action-button" type="button" onClick={() => setInspectorModal(null)}>
+                  Done
+                </button>
+              </div>
+            </section>
           </div>
         ) : null}
       </div>
