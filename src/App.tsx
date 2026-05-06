@@ -411,6 +411,7 @@ function App() {
   const assistantSidebarWidthRef = useRef(assistantSidebarWidth)
   const assistantResizeStartXRef = useRef(0)
   const assistantResizeStartWidthRef = useRef(assistantSidebarWidth)
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [, startTransition] = useTransition()
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
@@ -1254,7 +1255,18 @@ ${suggestion.reason}`,
       })
     }
 
-    void submitChat(question, isAskAndMapEnabled, 'follow_up')
+    setIsAssistantOpen(true)
+    setChatInput(question)
+
+    window.requestAnimationFrame(() => {
+      if (!composerTextareaRef.current) {
+        return
+      }
+
+      composerTextareaRef.current.focus()
+      const inputLength = composerTextareaRef.current.value.length
+      composerTextareaRef.current.setSelectionRange(inputLength, inputLength)
+    })
   }
 
   function handleAcceptSuggestion(suggestionId: string) {
@@ -1525,6 +1537,7 @@ ${suggestion.reason}`,
       <form className="composer" onSubmit={handleSend}>
         <textarea
           className="text-area text-area--composer"
+          ref={composerTextareaRef}
           value={chatInput}
           onChange={(event) => setChatInput(event.target.value)}
           onKeyDown={handleComposerKeyDown}

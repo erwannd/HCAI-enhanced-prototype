@@ -1,5 +1,5 @@
 import { MarkerType, type Edge, type Node } from 'reactflow'
-import { applyAutoNodeSize, createAutoSizedNode } from './canvas-layout'
+import { applyAutoNodeSize, createAutoSizedNode, getAutoNodeDimensions } from './canvas-layout'
 import type {
   CanvasMode,
   CanvasOperation,
@@ -225,14 +225,67 @@ function mapApiEdgeToReactFlowEdge(edge: ApiCanvasEdge): Edge {
   }
 }
 
-function getSuggestedNodePlacement(canvas: CanvasState) {
-  const nodeCount = canvas.nodes.length
-  const column = nodeCount % 3
-  const row = Math.floor(nodeCount / 3)
+function doNodeBoundsOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+  margin = 28,
+) {
+  return !(
+    left.x + left.width + margin <= right.x ||
+    right.x + right.width + margin <= left.x ||
+    left.y + left.height + margin <= right.y ||
+    right.y + right.height + margin <= left.y
+  )
+}
 
+function getSuggestedNodePlacement(
+  canvas: CanvasState,
+  dimensions: { width: number; height: number },
+) {
+  const occupiedBounds = canvas.nodes.map((node) => ({
+    x: node.position.x,
+    y: node.position.y,
+    width:
+      typeof node.width === 'number' && Number.isFinite(node.width)
+        ? node.width
+        : Number(node.style?.width ?? 250),
+    height:
+      typeof node.height === 'number' && Number.isFinite(node.height)
+        ? node.height
+        : Number(node.style?.height ?? 166),
+  }))
+
+  const horizontalStep = 320
+  const verticalStep = 240
+  const maxColumns = 4
+
+  for (let row = 0; row < 24; row += 1) {
+    for (let column = 0; column < maxColumns; column += 1) {
+      const candidate = {
+        x: 70 + column * horizontalStep,
+        y: 70 + row * verticalStep,
+        width: dimensions.width,
+        height: dimensions.height,
+      }
+
+      const overlapsExistingNode = occupiedBounds.some((bounds) =>
+        doNodeBoundsOverlap(candidate, bounds),
+      )
+
+      if (!overlapsExistingNode) {
+        return {
+          x: candidate.x,
+          y: candidate.y,
+        }
+      }
+    }
+  }
+
+  const fallbackColumn = canvas.nodes.length % maxColumns
+  const fallbackRow = Math.floor(canvas.nodes.length / maxColumns)
   return {
-    x: 70 + column * 280,
-    y: 70 + row * 200,
+    x: 70 + fallbackColumn * horizontalStep,
+    y: 70 + fallbackRow * verticalStep,
   }
 }
 
@@ -241,7 +294,8 @@ function mapApiSuggestionOperationToCanvasOperation(
   canvas: CanvasState,
 ): CanvasOperation | null {
   if (operation.type === 'add_node') {
-    const placement = getSuggestedNodePlacement(canvas)
+    const dimensions = getAutoNodeDimensions(operation.node.title, operation.node.text)
+    const placement = getSuggestedNodePlacement(canvas, dimensions)
 
     return {
       type: 'add_node',
@@ -300,14 +354,36 @@ export function mapApiSuggestionToCanvasSuggestion(
   suggestion: ApiSuggestion,
   canvas: CanvasState,
 ): CanvasSuggestion {
+  const workingCanvas: CanvasState = {
+    ...canvas,
+    nodes: [...canvas.nodes],
+    edges: [...canvas.edges],
+  }
+
   return {
     id: suggestion.id,
     title: suggestion.title,
     summary: suggestion.summary,
     reason: suggestion.reason,
-    operations: suggestion.operations
-      .map((operation) => mapApiSuggestionOperationToCanvasOperation(operation, canvas))
-      .filter((operation): operation is CanvasOperation => operation !== null),
+    operations: suggestion.operations.reduce<CanvasOperation[]>((mappedOperations, operation) => {
+      const mappedOperation = mapApiSuggestionOperationToCanvasOperation(operation, workingCanvas)
+
+      if (!mappedOperation) {
+        return mappedOperations
+      }
+
+      mappedOperations.push(mappedOperation)
+
+      if (mappedOperation.type === 'add_node') {
+        workingCanvas.nodes.push(mappedOperation.node)
+      }
+
+      if (mappedOperation.type === 'add_edge') {
+        workingCanvas.edges.push(mappedOperation.edge)
+      }
+
+      return mappedOperations
+    }, []),
   }
 }
 
