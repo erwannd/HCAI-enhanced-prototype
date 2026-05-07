@@ -27,8 +27,24 @@ function normalizeSystemID(systemID) {
   return 1;
 }
 
+function parseOptionalSystemID(systemID) {
+  if (
+    systemID === 1 ||
+    systemID === 2 ||
+    systemID === '1' ||
+    systemID === '2' ||
+    systemID === 'baseline' ||
+    systemID === 'enhanced'
+  ) {
+    return normalizeSystemID(systemID);
+  }
+
+  return null;
+}
+
 module.exports = {
   deriveSystemID,
   normalizeSystemID,
+  parseOptionalSystemID,
   parseParticipantNumber,
 };

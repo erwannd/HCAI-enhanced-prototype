@@ -483,17 +483,17 @@ export function mapApiInteractionsToChatHistory(interactions: ApiInteraction[]):
   })
 }
 
-export async function bootstrapParticipant(participantID: string) {
+export async function bootstrapParticipant(participantID: string, systemID?: SystemId | null) {
   return request<BootstrapResponse>('/participants/bootstrap', {
     method: 'POST',
-    body: JSON.stringify({ participantID }),
+    body: JSON.stringify({ participantID, ...(systemID ? { systemID } : {}) }),
   })
 }
 
-export async function createBackendSession(participantID: string, title: string) {
+export async function createBackendSession(participantID: string, title: string, systemID?: SystemId | null) {
   const response = await request<SessionResponse>('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ participantID, title }),
+    body: JSON.stringify({ participantID, title, ...(systemID ? { systemID } : {}) }),
   })
 
   return response.session

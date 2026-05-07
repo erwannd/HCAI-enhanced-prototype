@@ -7,7 +7,11 @@ const Interaction = require('../models/Interaction');
 const Participant = require('../models/Participant');
 const StudySession = require('../models/StudySession');
 const { asyncHandler } = require('../middleware/asyncHandler');
-const { deriveSystemID, normalizeSystemID } = require('../utils/systemAssignment');
+const {
+  deriveSystemID,
+  normalizeSystemID,
+  parseOptionalSystemID,
+} = require('../utils/systemAssignment');
 
 const router = express.Router();
 
@@ -25,7 +29,7 @@ router.post(
       return res.status(400).json({ error: 'title is required' });
     }
 
-    const systemID = deriveSystemID(participantID);
+    const systemID = parseOptionalSystemID(req.body.systemID) ?? deriveSystemID(participantID);
 
     await Participant.findOneAndUpdate(
       { participantID },

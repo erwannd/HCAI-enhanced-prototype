@@ -52,9 +52,11 @@ import type {
   StudyCanvasNode,
   StudyNodeKind,
   StudySession,
+  SystemId,
 } from './types'
 
 const PARTICIPANT_STORAGE_KEY = 'hcai-enhanced-prototype-participant-id'
+const SYSTEM_ID_STORAGE_KEY = 'hcai-enhanced-prototype-system-id'
 const ACTIVE_SESSION_STORAGE_KEY = 'hcai-enhanced-prototype-active-session-id'
 const ASSISTANT_DISPLAY_MODE_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-display-mode'
 const ASSISTANT_SIDEBAR_WIDTH_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-sidebar-width'
@@ -266,6 +268,41 @@ function resolveParticipantId() {
   return null
 }
 
+function normalizeSystemId(rawValue: SystemId | string | null | undefined): SystemId | null {
+  // Study condition IDs:
+  // 1 = baseline system, 2 = enhanced system.
+  if (rawValue === 2 || rawValue === '2' || rawValue === 'enhanced') {
+    return 2
+  }
+
+  if (rawValue === 1 || rawValue === '1' || rawValue === 'baseline') {
+    return 1
+  }
+
+  return null
+}
+
+function resolveSystemId() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const fromQuery = normalizeSystemId(params.get('systemID')?.trim() || params.get('systemId')?.trim())
+
+  if (fromQuery) {
+    window.localStorage.setItem(SYSTEM_ID_STORAGE_KEY, String(fromQuery))
+    return fromQuery
+  }
+
+  const fromStorage = normalizeSystemId(window.localStorage.getItem(SYSTEM_ID_STORAGE_KEY)?.trim())
+  if (fromStorage) {
+    return fromStorage
+  }
+
+  return null
+}
+
 function getStoredActiveSessionId() {
   if (typeof window === 'undefined') {
     return null
@@ -428,6 +465,7 @@ function applyCanvasOperations(
 
 function App() {
   const [participantId, setParticipantId] = useState('')
+  const [systemId, setSystemId] = useState<SystemId | null>(null)
   const [sessions, setSessions] = useState<StudySession[]>([])
   const [activeSessionId, setActiveSessionId] = useState('')
   const [chatInput, setChatInput] = useState('')
@@ -525,11 +563,15 @@ function App() {
           throw new Error('A participant ID is required before the enhanced prototype can load.')
         }
 
+        const resolvedSystemId = resolveSystemId()
+
         if (!isCancelled) {
           setParticipantId(resolvedParticipantId)
+          setSystemId(resolvedSystemId)
         }
 
-        const bootstrap = await bootstrapParticipant(resolvedParticipantId)
+        const bootstrap = await bootstrapParticipant(resolvedParticipantId, resolvedSystemId)
+        const effectiveSystemId = normalizeSystemId(bootstrap.participant.systemID) ?? 1
         const hydratedSessions = await Promise.all(bootstrap.sessions.map(hydrateSession))
         const frontendSessions = hydratedSessions.map(buildFrontendSession)
 
@@ -546,6 +588,10 @@ function App() {
         if (!isCancelled) {
           setSessions(frontendSessions)
           setActiveSessionId(preferredSessionId)
+          setSystemId(effectiveSystemId)
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(SYSTEM_ID_STORAGE_KEY, String(effectiveSystemId))
+          }
         }
       } catch (error) {
         if (!isCancelled) {
@@ -837,7 +883,7 @@ function App() {
 
     try {
       const title = sessionDraft.trim() || `Topic ${sessions.length + 1}`
-      const createdSession = await createBackendSession(participantId, title)
+      const createdSession = await createBackendSession(participantId, title, systemId)
       const hydratedSession = buildFrontendSession(await hydrateSession(createdSession))
 
       hydratedCanvasRevisionsRef.current[hydratedSession.id] = hydratedSession.canvas.revision
