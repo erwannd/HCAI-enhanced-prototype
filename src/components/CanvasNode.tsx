@@ -6,7 +6,6 @@ const kindDescriptions = {
   concept: 'Core idea',
   note: 'Learner note',
   example: 'Worked example',
-  question: 'Open question',
 }
 
 const handlePositions = [

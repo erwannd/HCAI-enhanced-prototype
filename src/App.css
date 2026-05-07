@@ -897,12 +897,6 @@
     rgba(236, 247, 239, 0.95);
 }
 
-.canvas-node--question {
-  background:
-    linear-gradient(180deg, rgba(246, 239, 226, 0.98), rgba(240, 227, 208, 0.95)),
-    rgba(246, 239, 226, 0.95);
-}
-
 .canvas-node__label {
   display: inline-flex;
   padding: 6px 10px;

@@ -11,7 +11,7 @@ const CanvasNodeSchema = new Schema(
     nodeType: {
       type: String,
       required: true,
-      enum: ['concept', 'note', 'example', 'question'],
+      enum: ['concept', 'note', 'example'],
     },
 
     title: { type: String, default: '' },

@@ -9,10 +9,10 @@ const confidenceCalculator = require('./confidenceCalculator');
 const retrievalService = require('./retrievalService');
 const { formatCanvasForPrompt, projectCanvasStateForPrompt } = require('../utils/canvasSerializer');
 
-const StudyNodeTypeSchema = z.enum(['concept', 'note', 'example', 'question']);
+const StudyNodeTypeSchema = z.enum(['concept', 'note', 'example']);
 const NonEmptyStringSchema = z.string().trim().min(1);
 const NonPlaceholderTitleSchema = NonEmptyStringSchema.refine(
-  (value) => !['new concept', 'study note', 'worked example', 'open question'].includes(value.toLowerCase()),
+  (value) => !['new concept', 'study note', 'worked example'].includes(value.toLowerCase()),
   'Use a specific learner-facing title instead of a placeholder.',
 );
 

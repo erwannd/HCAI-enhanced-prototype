@@ -162,7 +162,6 @@ const kindLabels: Record<StudyNodeKind, string> = {
   concept: 'Concept',
   note: 'Note',
   example: 'Example',
-  question: 'Question',
 }
 
 const defaultNodeContent: Record<StudyNodeKind, { title: string; text: string }> = {
@@ -177,10 +176,6 @@ const defaultNodeContent: Record<StudyNodeKind, { title: string; text: string }>
   example: {
     title: 'Worked Example',
     text: 'Add a concrete case so the concept is easier to remember later.',
-  },
-  question: {
-    title: 'Open Question',
-    text: 'Record a confusion, follow-up, or checkpoint for the assistant.',
   },
 }
 
@@ -359,14 +354,14 @@ function applyCanvasOperations(
       nextNodes = nextNodes.map((node) =>
         node.id === operation.nodeId
           ? applyAutoNodeSize({
-              ...node,
-              position: operation.patch.position ?? node.position,
-              style: operation.patch.style ? { ...node.style, ...operation.patch.style } : node.style,
-              data: {
-                ...node.data,
-                ...(operation.patch.data ?? {}),
-              },
-            })
+            ...node,
+            position: operation.patch.position ?? node.position,
+            style: operation.patch.style ? { ...node.style, ...operation.patch.style } : node.style,
+            data: {
+              ...node.data,
+              ...(operation.patch.data ?? {}),
+            },
+          })
           : node,
       )
       continue
@@ -404,6 +399,7 @@ function App() {
   const [isResizingAssistantSidebar, setIsResizingAssistantSidebar] = useState(false)
   const [inspectorModal, setInspectorModal] = useState<InspectorModalState | null>(null)
   const [canvasHoverHint, setCanvasHoverHint] = useState<CanvasHoverHint | null>(null)
+  const [canvasModeHint, setCanvasModeHint] = useState<string | null>(null)
   const [isAskAndMapEnabled, setIsAskAndMapEnabled] = useState(false)
   const [isAppLoading, setIsAppLoading] = useState(true)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
@@ -417,6 +413,7 @@ function App() {
   const assistantResizeStartWidthRef = useRef(assistantSidebarWidth)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const canvasHoverHintTimeoutRef = useRef<number | null>(null)
+  const canvasModeHintTimeoutRef = useRef<number | null>(null)
   const [, startTransition] = useTransition()
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
@@ -542,6 +539,10 @@ function App() {
       if (canvasHoverHintTimeoutRef.current !== null) {
         window.clearTimeout(canvasHoverHintTimeoutRef.current)
       }
+
+      if (canvasModeHintTimeoutRef.current !== null) {
+        window.clearTimeout(canvasModeHintTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -605,12 +606,12 @@ function App() {
               currentSessions.map((session) =>
                 session.id === sessionId && session.canvas.revision === revisionToPersist
                   ? {
-                      ...session,
-                      canvas: {
-                        ...session.canvas,
-                        revision: savedCanvas.revision,
-                      },
-                    }
+                    ...session,
+                    canvas: {
+                      ...session.canvas,
+                      revision: savedCanvas.revision,
+                    },
+                  }
                   : session,
               ),
             )
@@ -711,12 +712,12 @@ function App() {
           currentSessions.map((session) =>
             session.id === sessionId && session.canvas.revision === canvas.revision
               ? {
-                  ...session,
-                  canvas: {
-                    ...session.canvas,
-                    revision: savedCanvas.revision,
-                  },
-                }
+                ...session,
+                canvas: {
+                  ...session.canvas,
+                  revision: savedCanvas.revision,
+                },
+              }
               : session,
           ),
         )
@@ -855,7 +856,7 @@ function App() {
   }
 
   function handleToggleMode(nextMode: CanvasMode) {
-    if (!activeSessionId) {
+    if (!activeSessionId || !activeSession || activeSession.canvas.mode === nextMode) {
       return
     }
 
@@ -866,6 +867,21 @@ function App() {
         mode: nextMode,
       },
     }))
+
+    if (canvasModeHintTimeoutRef.current !== null) {
+      window.clearTimeout(canvasModeHintTimeoutRef.current)
+    }
+
+    setCanvasModeHint(
+      nextMode === 'edit'
+        ? 'Edit mode: drag, resize, and connect nodes to build the map.'
+        : 'View mode: editing is paused.',
+    )
+
+    canvasModeHintTimeoutRef.current = window.setTimeout(() => {
+      setCanvasModeHint(null)
+      canvasModeHintTimeoutRef.current = null
+    }, 1600)
   }
 
   function handleNodesChange(changes: NodeChange[]) {
@@ -964,10 +980,10 @@ function App() {
     setCanvasHoverHint((currentHint) =>
       currentHint
         ? {
-            ...currentHint,
-            x,
-            y,
-          }
+          ...currentHint,
+          x,
+          y,
+        }
         : currentHint,
     )
   }
@@ -1103,12 +1119,12 @@ function App() {
         nodes: session.canvas.nodes.map((node) =>
           node.id === selectedNode.id
             ? applyAutoNodeSize({
-                ...node,
-                data: {
-                  ...node.data,
-                  [field]: value,
-                },
-              })
+              ...node,
+              data: {
+                ...node.data,
+                [field]: value,
+              },
+            })
             : node,
         ),
       },
@@ -1128,9 +1144,9 @@ function App() {
         edges: session.canvas.edges.map((edge) =>
           edge.id === selectedEdge.id
             ? {
-                ...edge,
-                [field]: value,
-              }
+              ...edge,
+              [field]: value,
+            }
             : edge,
         ),
       },
@@ -1283,11 +1299,11 @@ function App() {
                 chatHistory: currentSession.chatHistory.map((message) =>
                   message.id === suggestionStatusMessageId
                     ? {
-                        ...message,
-                        content:
-                          'I answered the question, but I do not recommend a canvas update for this turn.',
-                        kind: 'default',
-                      }
+                      ...message,
+                      content:
+                        'I answered the question, but I do not recommend a canvas update for this turn.',
+                      kind: 'default',
+                    }
                     : message,
                 ),
               }
@@ -1438,9 +1454,9 @@ ${suggestion.reason}`,
         chatHistory: session.chatHistory.map((message) =>
           message.suggestionId === suggestionId
             ? {
-                ...message,
-                suggestionState: 'accepted',
-              }
+              ...message,
+              suggestionState: 'accepted',
+            }
             : message,
         ),
         pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
@@ -1482,9 +1498,9 @@ ${suggestion.reason}`,
       chatHistory: session.chatHistory.map((message) =>
         message.suggestionId === suggestionId
           ? {
-              ...message,
-              suggestionState: 'dismissed',
-            }
+            ...message,
+            suggestionState: 'dismissed',
+          }
           : message,
       ),
       pendingSuggestions: session.pendingSuggestions.filter((item) => item.id !== suggestionId),
@@ -1504,10 +1520,10 @@ ${suggestion.reason}`,
     label: string
     Icon: typeof SidebarModeIcon
   }> = [
-    { mode: 'sidebar', label: 'Sidebar', Icon: SidebarModeIcon },
-    { mode: 'floating', label: 'Floating', Icon: FloatingModeIcon },
-    { mode: 'fullscreen', label: 'Full screen', Icon: FullscreenModeIcon },
-  ]
+      { mode: 'sidebar', label: 'Sidebar', Icon: SidebarModeIcon },
+      { mode: 'floating', label: 'Floating', Icon: FloatingModeIcon },
+      { mode: 'fullscreen', label: 'Full screen', Icon: FullscreenModeIcon },
+    ]
 
   const assistantPanel = isAssistantOpen && activeSession ? (
     <section
@@ -1533,9 +1549,8 @@ ${suggestion.reason}`,
               <div className="assistant-mode-switch__menu">
                 {assistantModeOptions.map(({ mode, label, Icon }) => (
                   <button
-                    className={`assistant-mode-switch__option ${
-                      assistantDisplayMode === mode ? 'is-active' : ''
-                    }`}
+                    className={`assistant-mode-switch__option ${assistantDisplayMode === mode ? 'is-active' : ''
+                      }`}
                     key={mode}
                     type="button"
                     onClick={() => handleChangeAssistantDisplayMode(mode)}
@@ -1565,9 +1580,8 @@ ${suggestion.reason}`,
         <div className="message-list">
           {activeSession.chatHistory.map((message) => (
             <article
-              className={`message message--${message.role} ${
-                message.kind ? `message--${message.kind}` : ''
-              }`}
+              className={`message message--${message.role} ${message.kind ? `message--${message.kind}` : ''
+                }`}
               key={message.id}
             >
               <div className="message__meta">
@@ -1702,310 +1716,305 @@ ${suggestion.reason}`,
     <ReactFlowProvider>
       <div className="workspace">
         <div
-          className={`workspace__shell ${
-            isAssistantOpen && activeSession && assistantDisplayMode === 'sidebar'
-              ? 'workspace__shell--assistant-sidebar'
-              : ''
-          }`}
+          className={`workspace__shell ${isAssistantOpen && activeSession && assistantDisplayMode === 'sidebar'
+            ? 'workspace__shell--assistant-sidebar'
+            : ''
+            }`}
         >
           <div className={`workspace__grid ${!isWorkspaceSidebarOpen ? 'workspace__grid--sidebar-closed' : ''}`}>
-          <aside className={`workspace-rail ${isWorkspaceSidebarOpen ? 'is-open' : ''}`}>
-            <div className="workspace-rail__top">
-              <button
-                className="rail-button rail-button--logo"
-                type="button"
-                aria-label={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-                data-tooltip={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-                onClick={handleToggleWorkspaceSidebar}
-              >
-                <WorkspaceLogoIcon />
-                {isWorkspaceSidebarOpen ? <span className="rail-button__label rail-button__label--brand">Workspace</span> : null}
-              </button>
-            </div>
-
-            <div className="workspace-rail__actions">
-              <button
-                aria-label="Show sessions"
-                data-tooltip="Sessions"
-                className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'sessions' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => handleWorkspaceSidebarAction('sessions')}
-              >
-                <SessionsIcon />
-                {isWorkspaceSidebarOpen ? <span className="rail-button__label">Sessions</span> : null}
-              </button>
-              <button
-                aria-label="Show uploaded documents"
-                data-tooltip="Documents"
-                className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'documents' ? 'is-active' : ''}`}
-                type="button"
-                disabled={!activeSession}
-                onClick={() => handleWorkspaceSidebarAction('documents')}
-              >
-                <DocumentsIcon />
-                {isWorkspaceSidebarOpen ? <span className="rail-button__label">Documents</span> : null}
-              </button>
-            </div>
-
-            {isWorkspaceSidebarOpen ? (
-              <div className="workspace-rail__content">
-                <div className="workspace-rail__content-header">
-                  <p className="eyebrow">
-                    {workspaceSidebarView === 'sessions' ? 'Sessions' : 'Uploaded Documents'}
-                  </p>
-                  <h2>{workspaceSidebarView === 'sessions' ? 'Study topics' : activeSession?.title ?? 'No session selected'}</h2>
-                </div>
-
-                {appError ? <p className="panel__copy">{appError}</p> : null}
-
-                {workspaceSidebarView === 'sessions' ? (
-                  <>
-                    <p className="panel__copy sidebar-drawer__copy">
-                      {participantId
-                        ? `Participant ${participantId} can switch between topics without taking over the canvas.`
-                        : 'Switch between study topics without taking over the canvas.'}
-                    </p>
-
-                    <form className="session-form" onSubmit={handleCreateSession}>
-                      <input
-                        className="text-input"
-                        value={sessionDraft}
-                        onChange={(event) => setSessionDraft(event.target.value)}
-                        placeholder="Create a new session"
-                      />
-                      <button
-                        className="action-button action-button--primary"
-                        disabled={isCreatingSession || !participantId}
-                        type="submit"
-                      >
-                        {isCreatingSession ? 'Creating…' : 'New session'}
-                      </button>
-                    </form>
-
-                    <div className="session-list">
-                      {sessions.map((session) => {
-                        const isActive = session.id === activeSessionId
-
-                        return (
-                          <button
-                            key={session.id}
-                            className={`session-card ${isActive ? 'is-active' : ''}`}
-                            type="button"
-                            onClick={() => handleSwitchSession(session.id)}
-                          >
-                            <div className="session-card__title-row">
-                              <strong>{session.title}</strong>
-                              <span>{session.systemId}</span>
-                            </div>
-                            <p>
-                              {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges
-                            </p>
-                            <p>
-                              {session.chatHistory.length} messages, {session.uploadedDocuments.length} materials
-                            </p>
-                          </button>
-                        )
-                      })}
-
-                      {!isAppLoading && !sessions.length ? (
-                        <p className="panel__copy">
-                          No study sessions exist yet. Create the first one from the form above.
-                        </p>
-                      ) : null}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="panel__heading-row">
-                      <h3>Materials</h3>
-                      <label className="upload-button">
-                        {isUploadingDocuments ? 'Uploading…' : 'Upload'}
-                        <input type="file" multiple disabled={!activeSession || isUploadingDocuments} onChange={handleUploadMaterials} />
-                      </label>
-                    </div>
-
-                    <p className="panel__copy sidebar-drawer__copy">
-                      Uploaded references stay here so the session list stays compact.
-                    </p>
-
-                    <div className="document-list">
-                      {activeSession?.uploadedDocuments.map((documentName) => (
-                        <article className="document-card" key={documentName}>
-                          <div className="document-card__title">
-                            <DocumentsIcon />
-                            <strong>{documentName}</strong>
-                          </div>
-                          <p>Attached to {activeSession.title}</p>
-                        </article>
-                      ))}
-
-                      {activeSession && !activeSession.uploadedDocuments.length ? (
-                        <p className="panel__copy">
-                          No uploaded materials yet. Add lecture notes, screenshots, or handouts here.
-                        </p>
-                      ) : null}
-
-                      {!activeSession ? (
-                        <p className="panel__copy">
-                          Choose a session first, then upload the documents for that topic here.
-                        </p>
-                      ) : null}
-                    </div>
-                  </>
-                )}
+            <aside className={`workspace-rail ${isWorkspaceSidebarOpen ? 'is-open' : ''}`}>
+              <div className="workspace-rail__top">
+                <button
+                  className="rail-button rail-button--logo"
+                  type="button"
+                  aria-label={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                  data-tooltip={isWorkspaceSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                  onClick={handleToggleWorkspaceSidebar}
+                >
+                  <WorkspaceLogoIcon />
+                  {isWorkspaceSidebarOpen ? <span className="rail-button__label rail-button__label--brand">Workspace</span> : null}
+                </button>
               </div>
-            ) : null}
-          </aside>
 
-          <main className="panel panel--canvas">
-            {!activeSession ? (
-              <>
-                <div className="canvas-header">
-                  <div>
-                    <p className="eyebrow">Learning Canvas</p>
-                    <h2>{isAppLoading ? 'Loading…' : 'Create or choose a session'}</h2>
+              <div className="workspace-rail__actions">
+                <button
+                  aria-label="Show sessions"
+                  data-tooltip="Sessions"
+                  className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'sessions' ? 'is-active' : ''}`}
+                  type="button"
+                  onClick={() => handleWorkspaceSidebarAction('sessions')}
+                >
+                  <SessionsIcon />
+                  {isWorkspaceSidebarOpen ? <span className="rail-button__label">Sessions</span> : null}
+                </button>
+                <button
+                  aria-label="Show uploaded documents"
+                  data-tooltip="Documents"
+                  className={`rail-button rail-button--nav ${isWorkspaceSidebarOpen && workspaceSidebarView === 'documents' ? 'is-active' : ''}`}
+                  type="button"
+                  disabled={!activeSession}
+                  onClick={() => handleWorkspaceSidebarAction('documents')}
+                >
+                  <DocumentsIcon />
+                  {isWorkspaceSidebarOpen ? <span className="rail-button__label">Documents</span> : null}
+                </button>
+              </div>
+
+              {isWorkspaceSidebarOpen ? (
+                <div className="workspace-rail__content">
+                  <div className="workspace-rail__content-header">
+                    <p className="eyebrow">
+                      {workspaceSidebarView === 'sessions' ? 'Sessions' : 'Uploaded Documents'}
+                    </p>
+                    <h2>{workspaceSidebarView === 'sessions' ? 'Study topics' : activeSession?.title ?? 'No session selected'}</h2>
                   </div>
-                </div>
 
-                <section className="inspector">
-                  <div className="inspector__header">
+                  {appError ? <p className="panel__copy">{appError}</p> : null}
+
+                  {workspaceSidebarView === 'sessions' ? (
+                    <>
+                      <p className="panel__copy sidebar-drawer__copy">
+                        {participantId
+                          ? `Participant ${participantId} can switch between topics without taking over the canvas.`
+                          : 'Switch between study topics without taking over the canvas.'}
+                      </p>
+
+                      <form className="session-form" onSubmit={handleCreateSession}>
+                        <input
+                          className="text-input"
+                          value={sessionDraft}
+                          onChange={(event) => setSessionDraft(event.target.value)}
+                          placeholder="Create a new session"
+                        />
+                        <button
+                          className="action-button action-button--primary"
+                          disabled={isCreatingSession || !participantId}
+                          type="submit"
+                        >
+                          {isCreatingSession ? 'Creating…' : 'New session'}
+                        </button>
+                      </form>
+
+                      <div className="session-list">
+                        {sessions.map((session) => {
+                          const isActive = session.id === activeSessionId
+
+                          return (
+                            <button
+                              key={session.id}
+                              className={`session-card ${isActive ? 'is-active' : ''}`}
+                              type="button"
+                              onClick={() => handleSwitchSession(session.id)}
+                            >
+                              <div className="session-card__title-row">
+                                <strong>{session.title}</strong>
+                                <span>{session.systemId}</span>
+                              </div>
+                              <p>
+                                {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges
+                              </p>
+                              <p>
+                                {session.chatHistory.length} messages, {session.uploadedDocuments.length} materials
+                              </p>
+                            </button>
+                          )
+                        })}
+
+                        {!isAppLoading && !sessions.length ? (
+                          <p className="panel__copy">
+                            No study sessions exist yet. Create the first one from the form above.
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="panel__heading-row">
+                        <h3>Materials</h3>
+                        <label className="upload-button">
+                          {isUploadingDocuments ? 'Uploading…' : 'Upload'}
+                          <input type="file" multiple disabled={!activeSession || isUploadingDocuments} onChange={handleUploadMaterials} />
+                        </label>
+                      </div>
+
+                      <p className="panel__copy sidebar-drawer__copy">
+                        Uploaded references stay here so the session list stays compact.
+                      </p>
+
+                      <div className="document-list">
+                        {activeSession?.uploadedDocuments.map((documentName) => (
+                          <article className="document-card" key={documentName}>
+                            <div className="document-card__title">
+                              <DocumentsIcon />
+                              <strong>{documentName}</strong>
+                            </div>
+                            <p>Attached to {activeSession.title}</p>
+                          </article>
+                        ))}
+
+                        {activeSession && !activeSession.uploadedDocuments.length ? (
+                          <p className="panel__copy">
+                            No uploaded materials yet. Add lecture notes, screenshots, or handouts here.
+                          </p>
+                        ) : null}
+
+                        {!activeSession ? (
+                          <p className="panel__copy">
+                            Choose a session first, then upload the documents for that topic here.
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </aside>
+
+            <main className="panel panel--canvas">
+              {!activeSession ? (
+                <>
+                  <div className="canvas-header">
                     <div>
-                      <p className="eyebrow">Workspace Status</p>
-                      <h3>{isAppLoading ? 'Connecting to the backend' : 'No active study session'}</h3>
+                      <p className="eyebrow">Learning Canvas</p>
+                      <h2>{isAppLoading ? 'Loading…' : 'Create or choose a session'}</h2>
                     </div>
                   </div>
-                  <p className="panel__copy">
-                    {isAppLoading
-                      ? 'Loading participant data, sessions, documents, chat history, and canvas state.'
-                      : 'Create a session from the sidebar to start building a concept map and chatting with the assistant.'}
-                  </p>
-                </section>
-              </>
-            ) : (
-              <>
-                <div className="canvas-header">
-                  <div>
-                    <p className="eyebrow">Learning Canvas</p>
-                    <h2>{activeSession.title}</h2>
+
+                  <section className="inspector">
+                    <div className="inspector__header">
+                      <div>
+                        <p className="eyebrow">Workspace Status</p>
+                        <h3>{isAppLoading ? 'Connecting to the backend' : 'No active study session'}</h3>
+                      </div>
+                    </div>
+                    <p className="panel__copy">
+                      {isAppLoading
+                        ? 'Loading participant data, sessions, documents, chat history, and canvas state.'
+                        : 'Create a session from the sidebar to start building a concept map and chatting with the assistant.'}
+                    </p>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <div className="canvas-header">
+                    <div>
+                      <p className="eyebrow">Learning Canvas</p>
+                      <h2>{activeSession.title}</h2>
+                    </div>
+
+                    <div className="canvas-header__actions">
+                      <div className="mode-toggle">
+                        <button
+                          className={activeSession.canvas.mode === 'view' ? 'is-active' : ''}
+                          type="button"
+                          onClick={() => handleToggleMode('view')}
+                        >
+                          View
+                        </button>
+                        <button
+                          className={activeSession.canvas.mode === 'edit' ? 'is-active' : ''}
+                          type="button"
+                          onClick={() => handleToggleMode('edit')}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="canvas-header__actions">
-                    <div className="mode-toggle">
+                  <div className="canvas-toolbar">
+                  {(['concept', 'note', 'example'] as StudyNodeKind[]).map((kind) => (
                       <button
-                        className={activeSession.canvas.mode === 'view' ? 'is-active' : ''}
+                        key={kind}
+                        className="action-button"
                         type="button"
-                        onClick={() => handleToggleMode('view')}
+                        disabled={activeSession.canvas.mode !== 'edit'}
+                        onClick={() => handleQuickAdd(kind)}
                       >
-                        View
+                        Add {kindLabels[kind]}
+                      </button>
+                    ))}
+                    <div className="canvas-toolbar__selection-actions">
+                      <button
+                        className="action-button"
+                        disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
+                        type="button"
+                        onClick={openInspectorForSelection}
+                      >
+                        Edit selection
                       </button>
                       <button
-                        className={activeSession.canvas.mode === 'edit' ? 'is-active' : ''}
+                        className="action-button"
+                        disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
                         type="button"
-                        onClick={() => handleToggleMode('edit')}
+                        onClick={handleDeleteSelection}
                       >
-                        Edit
+                        Remove selection
                       </button>
                     </div>
                   </div>
-                </div>
 
-                <div className="canvas-toolbar">
-                  {(['concept', 'note', 'example', 'question'] as StudyNodeKind[]).map((kind) => (
-                    <button
-                      key={kind}
-                      className="action-button"
-                      type="button"
-                      disabled={activeSession.canvas.mode !== 'edit'}
-                      onClick={() => handleQuickAdd(kind)}
-                    >
-                      Add {kindLabels[kind]}
-                    </button>
-                  ))}
-                  <div className="canvas-toolbar__selection-actions">
-                    <button
-                      className="action-button"
-                      disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
-                      type="button"
-                      onClick={openInspectorForSelection}
-                    >
-                      Edit selection
-                    </button>
-                    <button
-                      className="action-button"
-                      disabled={!hasSelection || activeSession.canvas.mode !== 'edit'}
-                      type="button"
-                      onClick={handleDeleteSelection}
-                    >
-                      Remove selection
-                    </button>
+                  <div className="canvas-stage">
+                    {canvasModeHint ? <div className="canvas-stage__hint">{canvasModeHint}</div> : null}
+
+                    <CanvasModeContext value={activeSession.canvas.mode}>
+                      <ReactFlow
+                        fitView
+                        proOptions={{ hideAttribution: true }}
+                        nodes={activeSession.canvas.nodes}
+                        edges={activeSession.canvas.edges}
+                        nodeTypes={nodeTypes}
+                        connectionMode={ConnectionMode.Loose}
+                        onNodesChange={handleNodesChange}
+                        onEdgesChange={handleEdgesChange}
+                        onConnect={handleConnect}
+                        onReconnect={handleReconnect}
+                        onSelectionChange={handleSelectionChange}
+                        onNodeDoubleClick={(_, node) => handleNodeDoubleClick(node.id)}
+                        onEdgeDoubleClick={(_, edge) => handleEdgeDoubleClick(edge.id)}
+                        onNodeMouseEnter={(event) =>
+                          showCanvasHoverHint(event.clientX, event.clientY)
+                        }
+                        onNodeMouseMove={(event) =>
+                          updateCanvasHoverHintPosition(event.clientX, event.clientY)
+                        }
+                        onNodeMouseLeave={clearCanvasHoverHint}
+                        onEdgeMouseEnter={(event) =>
+                          showCanvasHoverHint(event.clientX, event.clientY)
+                        }
+                        onEdgeMouseMove={(event) =>
+                          updateCanvasHoverHintPosition(event.clientX, event.clientY)
+                        }
+                        onEdgeMouseLeave={clearCanvasHoverHint}
+                        nodesDraggable={activeSession.canvas.mode === 'edit' && !inspectorModal}
+                        nodesConnectable={activeSession.canvas.mode === 'edit' && !inspectorModal}
+                        edgesUpdatable={activeSession.canvas.mode === 'edit' && !inspectorModal}
+                        reconnectRadius={24}
+                        elementsSelectable={!inspectorModal}
+                        panOnDrag={!inspectorModal}
+                        zoomOnScroll={!inspectorModal}
+                        zoomOnPinch={!inspectorModal}
+                        zoomOnDoubleClick={!inspectorModal}
+                      >
+                        <Background
+                          color="rgba(20, 73, 76, 0.12)"
+                          gap={22}
+                          variant={BackgroundVariant.Dots}
+                        />
+                        <MiniMap
+                          pannable
+                          zoomable
+                          nodeStrokeColor="rgba(20, 73, 76, 0.65)"
+                          nodeColor="rgba(245, 241, 230, 0.95)"
+                          maskColor="rgba(6, 28, 31, 0.18)"
+                        />
+                        <Controls showInteractive={false} />
+                      </ReactFlow>
+                    </CanvasModeContext>
                   </div>
-                </div>
-
-                <div className="canvas-stage">
-                  <div className="canvas-stage__hint">
-                    {activeSession.canvas.mode === 'edit'
-                      ? 'Drag nodes, resize cards, and connect handles to build the map.'
-                      : 'View Mode removes editing clutter so the learner can read the concept map.'}
-                  </div>
-
-                  <CanvasModeContext value={activeSession.canvas.mode}>
-                    <ReactFlow
-                      fitView
-                      proOptions={{ hideAttribution: true }}
-                      nodes={activeSession.canvas.nodes}
-                      edges={activeSession.canvas.edges}
-                      nodeTypes={nodeTypes}
-                      connectionMode={ConnectionMode.Loose}
-                      onNodesChange={handleNodesChange}
-                      onEdgesChange={handleEdgesChange}
-                      onConnect={handleConnect}
-                      onReconnect={handleReconnect}
-                      onSelectionChange={handleSelectionChange}
-                      onNodeDoubleClick={(_, node) => handleNodeDoubleClick(node.id)}
-                      onEdgeDoubleClick={(_, edge) => handleEdgeDoubleClick(edge.id)}
-                      onNodeMouseEnter={(event) =>
-                        showCanvasHoverHint(event.clientX, event.clientY)
-                      }
-                      onNodeMouseMove={(event) =>
-                        updateCanvasHoverHintPosition(event.clientX, event.clientY)
-                      }
-                      onNodeMouseLeave={clearCanvasHoverHint}
-                      onEdgeMouseEnter={(event) =>
-                        showCanvasHoverHint(event.clientX, event.clientY)
-                      }
-                      onEdgeMouseMove={(event) =>
-                        updateCanvasHoverHintPosition(event.clientX, event.clientY)
-                      }
-                      onEdgeMouseLeave={clearCanvasHoverHint}
-                      nodesDraggable={activeSession.canvas.mode === 'edit' && !inspectorModal}
-                      nodesConnectable={activeSession.canvas.mode === 'edit' && !inspectorModal}
-                      edgesUpdatable={activeSession.canvas.mode === 'edit' && !inspectorModal}
-                      reconnectRadius={24}
-                      elementsSelectable={!inspectorModal}
-                      panOnDrag={!inspectorModal}
-                      zoomOnScroll={!inspectorModal}
-                      zoomOnPinch={!inspectorModal}
-                      zoomOnDoubleClick={!inspectorModal}
-                    >
-                      <Background
-                        color="rgba(20, 73, 76, 0.12)"
-                        gap={22}
-                        variant={BackgroundVariant.Dots}
-                      />
-                      <MiniMap
-                        pannable
-                        zoomable
-                        nodeStrokeColor="rgba(20, 73, 76, 0.65)"
-                        nodeColor="rgba(245, 241, 230, 0.95)"
-                        maskColor="rgba(6, 28, 31, 0.18)"
-                      />
-                      <Controls showInteractive={false} />
-                    </ReactFlow>
-                  </CanvasModeContext>
-                </div>
-              </>
-            )}
-          </main>
+                </>
+              )}
+            </main>
           </div>
 
           {isAssistantOpen && activeSession && assistantDisplayMode === 'sidebar' ? (

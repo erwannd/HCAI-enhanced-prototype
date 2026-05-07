@@ -30,7 +30,7 @@ type ApiSessionSummary = {
 
 type ApiCanvasNode = {
   nodeID: string
-  nodeType: StudyNodeKind
+  nodeType: string
   title: string
   text: string
   x?: number
@@ -102,7 +102,7 @@ type ApiSuggestionOperation =
       type: 'add_node'
       node: {
         nodeID: string
-        nodeType: StudyNodeKind
+        nodeType: string
         title: string
         text: string
       }
@@ -113,7 +113,7 @@ type ApiSuggestionOperation =
       patch: {
         title?: string
         text?: string
-        nodeType?: StudyNodeKind
+        nodeType?: string
       }
     }
   | {
@@ -187,6 +187,19 @@ function formatMessageTime(timestamp?: string) {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+function normalizeStudyNodeKind(value: string): StudyNodeKind {
+  if (value === 'concept' || value === 'note' || value === 'example') {
+    return value
+  }
+
+  // Older sessions may still contain question nodes. Preserve them as notes.
+  if (value === 'question') {
+    return 'note'
+  }
+
+  return 'concept'
+}
+
 function mapApiNodeToReactFlowNode(node: ApiCanvasNode): Node {
   return applyAutoNodeSize({
     id: node.nodeID,
@@ -205,7 +218,7 @@ function mapApiNodeToReactFlowNode(node: ApiCanvasNode): Node {
           }
         : undefined,
     data: {
-      kind: node.nodeType,
+      kind: normalizeStudyNodeKind(node.nodeType),
       title: node.title,
       text: node.text,
     },
@@ -301,7 +314,7 @@ function mapApiSuggestionOperationToCanvasOperation(
       type: 'add_node',
       node: createAutoSizedNode({
         id: operation.node.nodeID,
-        kind: operation.node.nodeType,
+        kind: normalizeStudyNodeKind(operation.node.nodeType),
         position: placement,
         title: operation.node.title,
         text: operation.node.text,
@@ -315,7 +328,9 @@ function mapApiSuggestionOperationToCanvasOperation(
       nodeId: operation.nodeID,
       patch: {
         data: {
-          ...(operation.patch.nodeType ? { kind: operation.patch.nodeType } : {}),
+          ...(operation.patch.nodeType
+            ? { kind: normalizeStudyNodeKind(operation.patch.nodeType) }
+            : {}),
           ...(operation.patch.title !== undefined ? { title: operation.patch.title } : {}),
           ...(operation.patch.text !== undefined ? { text: operation.patch.text } : {}),
         },

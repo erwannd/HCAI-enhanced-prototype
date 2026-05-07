@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { Edge, Node, XYPosition } from 'reactflow'
 
-export type StudyNodeKind = 'concept' | 'note' | 'example' | 'question'
+export type StudyNodeKind = 'concept' | 'note' | 'example'
 export type CanvasMode = 'view' | 'edit'
 export type SystemId = 'baseline' | 'enhanced'
 

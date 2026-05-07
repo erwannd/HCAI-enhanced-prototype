@@ -1,8 +1,13 @@
 function normalizeNodeType(value) {
   const normalized = String(value || '').toLowerCase();
 
-  if (['concept', 'note', 'example', 'question'].includes(normalized)) {
+  if (['concept', 'note', 'example'].includes(normalized)) {
     return normalized;
+  }
+
+  // Preserve older question nodes as notes after the question feature removal.
+  if (normalized === 'question') {
+    return 'note';
   }
 
   return 'concept';
