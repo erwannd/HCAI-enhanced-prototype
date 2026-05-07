@@ -416,6 +416,7 @@ function App() {
   const assistantResizeStartXRef = useRef(0)
   const assistantResizeStartWidthRef = useRef(assistantSidebarWidth)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const canvasHoverHintTimeoutRef = useRef<number | null>(null)
   const [, startTransition] = useTransition()
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null
@@ -535,6 +536,14 @@ function App() {
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [inspectorModal])
+
+  useEffect(() => {
+    return () => {
+      if (canvasHoverHintTimeoutRef.current !== null) {
+        window.clearTimeout(canvasHoverHintTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!isResizingAssistantSidebar) {
@@ -931,15 +940,44 @@ function App() {
     setInspectorModal({ kind: 'edge', id: edgeId })
   }
 
-  function handleCanvasHoverHint(x: number, y: number, text = 'Double-click to edit') {
+  function scheduleCanvasHoverHintDismissal() {
+    if (canvasHoverHintTimeoutRef.current !== null) {
+      window.clearTimeout(canvasHoverHintTimeoutRef.current)
+    }
+
+    canvasHoverHintTimeoutRef.current = window.setTimeout(() => {
+      setCanvasHoverHint(null)
+      canvasHoverHintTimeoutRef.current = null
+    }, 1100)
+  }
+
+  function showCanvasHoverHint(x: number, y: number, text = 'Double-click to edit') {
     if (!activeSession || activeSession.canvas.mode !== 'edit' || inspectorModal) {
       return
     }
 
     setCanvasHoverHint({ x, y, text })
+    scheduleCanvasHoverHintDismissal()
+  }
+
+  function updateCanvasHoverHintPosition(x: number, y: number) {
+    setCanvasHoverHint((currentHint) =>
+      currentHint
+        ? {
+            ...currentHint,
+            x,
+            y,
+          }
+        : currentHint,
+    )
   }
 
   function clearCanvasHoverHint() {
+    if (canvasHoverHintTimeoutRef.current !== null) {
+      window.clearTimeout(canvasHoverHintTimeoutRef.current)
+      canvasHoverHintTimeoutRef.current = null
+    }
+
     setCanvasHoverHint(null)
   }
 
@@ -1926,17 +1964,17 @@ ${suggestion.reason}`,
                       onNodeDoubleClick={(_, node) => handleNodeDoubleClick(node.id)}
                       onEdgeDoubleClick={(_, edge) => handleEdgeDoubleClick(edge.id)}
                       onNodeMouseEnter={(event) =>
-                        handleCanvasHoverHint(event.clientX, event.clientY)
+                        showCanvasHoverHint(event.clientX, event.clientY)
                       }
                       onNodeMouseMove={(event) =>
-                        handleCanvasHoverHint(event.clientX, event.clientY)
+                        updateCanvasHoverHintPosition(event.clientX, event.clientY)
                       }
                       onNodeMouseLeave={clearCanvasHoverHint}
                       onEdgeMouseEnter={(event) =>
-                        handleCanvasHoverHint(event.clientX, event.clientY)
+                        showCanvasHoverHint(event.clientX, event.clientY)
                       }
                       onEdgeMouseMove={(event) =>
-                        handleCanvasHoverHint(event.clientX, event.clientY)
+                        updateCanvasHoverHintPosition(event.clientX, event.clientY)
                       }
                       onEdgeMouseLeave={clearCanvasHoverHint}
                       nodesDraggable={activeSession.canvas.mode === 'edit' && !inspectorModal}
