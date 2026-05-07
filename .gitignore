@@ -26,9 +26,6 @@ server/.env.*
 !server/.env.example
 *.local
 
-# Temporary backend uploads
-server/uploads/
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
