@@ -573,8 +573,7 @@
   box-shadow: 0 12px 26px rgba(7, 33, 36, 0.16);
 }
 
-.react-flow__controls,
-.react-flow__minimap {
+.react-flow__controls {
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(20, 73, 76, 0.18);

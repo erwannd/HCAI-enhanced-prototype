@@ -14,7 +14,6 @@ import ReactFlow, {
   ConnectionMode,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlowProvider,
   addEdge,
   applyEdgeChanges,
@@ -2001,14 +2000,7 @@ ${suggestion.reason}`,
                           gap={22}
                           variant={BackgroundVariant.Dots}
                         />
-                        <MiniMap
-                          pannable
-                          zoomable
-                          nodeStrokeColor="rgba(20, 73, 76, 0.65)"
-                          nodeColor="rgba(245, 241, 230, 0.95)"
-                          maskColor="rgba(6, 28, 31, 0.18)"
-                        />
-                        <Controls showInteractive={false} />
+                      <Controls showInteractive={false} />
                       </ReactFlow>
                     </CanvasModeContext>
                   </div>
