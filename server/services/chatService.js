@@ -8,6 +8,7 @@ const StudySession = require('../models/StudySession');
 const confidenceCalculator = require('./confidenceCalculator');
 const retrievalService = require('./retrievalService');
 const { formatCanvasForPrompt, projectCanvasStateForPrompt } = require('../utils/canvasSerializer');
+const { normalizeSystemID } = require('../utils/systemAssignment');
 
 const StudyNodeTypeSchema = z.enum(['concept', 'note', 'example']);
 const NonEmptyStringSchema = z.string().trim().min(1);
@@ -593,6 +594,7 @@ class ChatService {
   async createChatTurn(session, userInput, options = {}) {
     const retrievalMethod = options.retrievalMethod || 'semantic';
     const responseMode = this.normalizeResponseMode(options.responseMode || 'standard');
+    const systemID = normalizeSystemID(session.systemID);
     const {
       historyMessages,
       historyTranscript,
@@ -640,7 +642,7 @@ class ChatService {
 
     const interaction = await Interaction.create({
       participantID: session.participantID,
-      systemID: session.systemID,
+      systemID,
       sessionID: session.sessionID,
       userInput,
       botResponse,

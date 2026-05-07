@@ -3,7 +3,7 @@ const express = require('express');
 const Participant = require('../models/Participant');
 const StudySession = require('../models/StudySession');
 const { asyncHandler } = require('../middleware/asyncHandler');
-const { deriveSystemID } = require('../utils/systemAssignment');
+const { deriveSystemID, normalizeSystemID } = require('../utils/systemAssignment');
 
 const router = express.Router();
 
@@ -37,8 +37,14 @@ router.post(
       .lean();
 
     res.json({
-      participant,
-      sessions,
+      participant: {
+        ...participant.toObject(),
+        systemID: normalizeSystemID(participant.systemID),
+      },
+      sessions: sessions.map((session) => ({
+        ...session,
+        systemID: normalizeSystemID(session.systemID),
+      })),
     });
   }),
 );
@@ -52,7 +58,12 @@ router.get(
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json({ sessions });
+    res.json({
+      sessions: sessions.map((session) => ({
+        ...session,
+        systemID: normalizeSystemID(session.systemID),
+      })),
+    });
   }),
 );
 

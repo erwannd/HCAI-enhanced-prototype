@@ -5,6 +5,7 @@ const CanvasState = require('../models/CanvasState');
 const StudySession = require('../models/StudySession');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { serializeCanvasState } = require('../utils/canvasSerializer');
+const { normalizeSystemID } = require('../utils/systemAssignment');
 
 const router = express.Router();
 
@@ -17,20 +18,27 @@ router.get(
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    const systemID = normalizeSystemID(session.systemID);
+
     let canvasState = await CanvasState.findOne({ sessionID: session.sessionID }).lean();
 
     if (!canvasState) {
       canvasState = await CanvasState.create({
         sessionID: session.sessionID,
         participantID: session.participantID,
-        systemID: session.systemID,
+        systemID,
         revision: 0,
         nodes: [],
         edges: [],
       });
     }
 
-    res.json({ canvas: canvasState });
+    res.json({
+      canvas: {
+        ...canvasState,
+        systemID,
+      },
+    });
   }),
 );
 
@@ -43,6 +51,8 @@ router.put(
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    const systemID = normalizeSystemID(session.systemID);
+
     const actor = ['user', 'assistant'].includes(req.body.actor) ? req.body.actor : 'user';
     const interactionID = req.body.interactionID || null;
     const operations = Array.isArray(req.body.operations) ? req.body.operations : [];
@@ -54,7 +64,7 @@ router.put(
       canvasState = new CanvasState({
         sessionID: session.sessionID,
         participantID: session.participantID,
-        systemID: session.systemID,
+        systemID,
         revision: 0,
         nodes: [],
         edges: [],
@@ -62,6 +72,7 @@ router.put(
     }
 
     canvasState.revision += 1;
+    canvasState.systemID = systemID;
     canvasState.nodes = semanticCanvas.nodes;
     canvasState.edges = semanticCanvas.edges;
     canvasState.updatedAtCanvas = new Date();
@@ -71,7 +82,7 @@ router.put(
       await CanvasOperationLog.create({
         sessionID: session.sessionID,
         participantID: session.participantID,
-        systemID: session.systemID,
+        systemID,
         actor,
         interactionID,
         revision: canvasState.revision,
@@ -80,7 +91,10 @@ router.put(
     }
 
     res.json({
-      canvas: canvasState,
+      canvas: {
+        ...canvasState.toObject(),
+        systemID,
+      },
     });
   }),
 );

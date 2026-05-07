@@ -1971,7 +1971,7 @@ ${suggestion.reason}`,
                             >
                               <div className="session-card__title-row">
                                 <strong>{session.title}</strong>
-                                <span>{session.systemId}</span>
+                                <span>System {session.systemId}</span>
                               </div>
                               <p>
                                 {session.canvas.nodes.length} nodes, {session.canvas.edges.length} edges

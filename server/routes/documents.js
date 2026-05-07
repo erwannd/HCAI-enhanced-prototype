@@ -9,6 +9,7 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const documentProcessor = require('../services/documentProcessor');
 const embeddingService = require('../services/embeddingService');
 const retrievalService = require('../services/retrievalService');
+const { normalizeSystemID } = require('../utils/systemAssignment');
 
 const upload = multer({
   dest: path.join(__dirname, '..', 'uploads'),
@@ -32,7 +33,12 @@ router.get(
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json({ documents });
+    res.json({
+      documents: documents.map((document) => ({
+        ...document,
+        systemID: normalizeSystemID(document.systemID),
+      })),
+    });
   }),
 );
 
@@ -50,6 +56,8 @@ router.post(
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    const systemID = normalizeSystemID(session.systemID);
+
     if (!req.file) {
       return res.status(400).json({ error: 'document upload is required' });
     }
@@ -61,7 +69,7 @@ router.post(
       const document = await Document.create({
         sessionID: session.sessionID,
         participantID: session.participantID,
-        systemID: session.systemID,
+        systemID,
         filename: req.file.originalname,
         text: processed.fullText,
         chunks,
@@ -76,7 +84,7 @@ router.post(
           _id: document._id,
           sessionID: document.sessionID,
           participantID: document.participantID,
-          systemID: document.systemID,
+          systemID: normalizeSystemID(document.systemID),
           filename: document.filename,
           processingStatus: document.processingStatus,
           processedAt: document.processedAt,

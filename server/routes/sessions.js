@@ -7,7 +7,7 @@ const Interaction = require('../models/Interaction');
 const Participant = require('../models/Participant');
 const StudySession = require('../models/StudySession');
 const { asyncHandler } = require('../middleware/asyncHandler');
-const { deriveSystemID } = require('../utils/systemAssignment');
+const { deriveSystemID, normalizeSystemID } = require('../utils/systemAssignment');
 
 const router = express.Router();
 
@@ -59,7 +59,12 @@ router.post(
       edges: [],
     });
 
-    res.status(201).json({ session });
+    res.status(201).json({
+      session: {
+        ...session.toObject(),
+        systemID: normalizeSystemID(session.systemID),
+      },
+    });
   }),
 );
 
@@ -78,7 +83,10 @@ router.get(
     ]);
 
     res.json({
-      session,
+      session: {
+        ...session,
+        systemID: normalizeSystemID(session.systemID),
+      },
       summary: {
         documentCount,
         interactionCount,
@@ -111,7 +119,12 @@ router.patch(
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    res.json({ session });
+    res.json({
+      session: {
+        ...session,
+        systemID: normalizeSystemID(session.systemID),
+      },
+    });
   }),
 );
 

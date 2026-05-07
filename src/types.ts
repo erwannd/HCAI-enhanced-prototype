@@ -3,7 +3,9 @@ import type { Edge, Node, XYPosition } from 'reactflow'
 
 export type StudyNodeKind = 'concept' | 'note' | 'example'
 export type CanvasMode = 'view' | 'edit'
-export type SystemId = 'baseline' | 'enhanced'
+// Study condition IDs:
+// 1 = baseline system, 2 = enhanced system.
+export type SystemId = 1 | 2
 export type ExplanationMode = 'quick' | 'standard' | 'deep_dive' | 'example'
 
 export type CanvasNodeData = {

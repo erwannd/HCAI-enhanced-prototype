@@ -11,11 +11,24 @@ function parseParticipantNumber(participantID) {
 function deriveSystemID(participantID) {
   const participantNumber = parseParticipantNumber(participantID);
 
+  // Study condition IDs:
+  // 1 = baseline system, 2 = enhanced system.
   // Even-numbered participants go to the enhanced system.
-  return participantNumber % 2 === 0 ? 'enhanced' : 'baseline';
+  return participantNumber % 2 === 0 ? 2 : 1;
+}
+
+function normalizeSystemID(systemID) {
+  // Study condition IDs:
+  // 1 = baseline system, 2 = enhanced system.
+  if (systemID === 2 || systemID === '2' || systemID === 'enhanced') {
+    return 2;
+  }
+
+  return 1;
 }
 
 module.exports = {
   deriveSystemID,
+  normalizeSystemID,
   parseParticipantNumber,
 };

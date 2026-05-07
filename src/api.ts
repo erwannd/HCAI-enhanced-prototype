@@ -17,13 +17,13 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000
 
 type ApiParticipant = {
   participantID: string
-  systemID: SystemId
+  systemID: SystemId | 'baseline' | 'enhanced' | '1' | '2'
 }
 
 type ApiSessionSummary = {
   sessionID: string
   participantID: string
-  systemID: SystemId
+  systemID: SystemId | 'baseline' | 'enhanced' | '1' | '2'
   title: string
   followUpQuestions?: string[]
   status?: string
@@ -192,6 +192,16 @@ function formatMessageTime(timestamp?: string) {
 
 function normalizeExplanationMode(value: string | null | undefined): ExplanationMode {
   return value === 'quick' || value === 'deep_dive' || value === 'example' ? value : 'standard'
+}
+
+function normalizeSystemId(value: SystemId | 'baseline' | 'enhanced' | '1' | '2' | null | undefined): SystemId {
+  // Study condition IDs:
+  // 1 = baseline system, 2 = enhanced system.
+  if (value === 2 || value === '2' || value === 'enhanced') {
+    return 2
+  }
+
+  return 1
 }
 
 function normalizeStudyNodeKind(value: string): StudyNodeKind {
@@ -602,7 +612,7 @@ export async function hydrateSession(summary: ApiSessionSummary): Promise<Hydrat
   return {
     id: summary.sessionID,
     participantId: summary.participantID,
-    systemId: summary.systemID,
+    systemId: normalizeSystemId(summary.systemID),
     title: summary.title,
     uploadedDocuments: documents.map((document) => document.filename),
     canvas: mapApiCanvasToCanvasState(canvas),

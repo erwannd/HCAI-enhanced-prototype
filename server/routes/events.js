@@ -3,6 +3,7 @@ const express = require('express');
 const EventLog = require('../models/EventLog');
 const StudySession = require('../models/StudySession');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { normalizeSystemID } = require('../utils/systemAssignment');
 
 const router = express.Router();
 
@@ -15,6 +16,8 @@ router.post(
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    const systemID = normalizeSystemID(session.systemID);
+
     const eventType = String(req.body.eventType || '').trim();
     const elementName = String(req.body.elementName || '').trim();
 
@@ -24,7 +27,7 @@ router.post(
 
     const event = await EventLog.create({
       participantID: session.participantID,
-      systemID: session.systemID,
+      systemID,
       sessionID: session.sessionID,
       eventType,
       elementName,

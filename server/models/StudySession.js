@@ -22,10 +22,11 @@ const StudySessionSchema = new Schema(
       trim: true,
     },
 
+    // 1 = baseline system, 2 = enhanced system.
     systemID: {
-      type: String,
+      type: Number,
       required: true,
-      enum: ['baseline', 'enhanced'],
+      enum: [1, 2],
       index: true,
     },
 
