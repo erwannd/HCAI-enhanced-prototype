@@ -1852,11 +1852,11 @@ ${suggestion.reason}`,
 
                   {workspaceSidebarView === 'sessions' ? (
                     <>
-                      <p className="panel__copy sidebar-drawer__copy">
+                      {/* <p className="panel__copy sidebar-drawer__copy">
                         {participantId
-                          ? `Participant ${participantId} can switch between topics without taking over the canvas.`
+                          ? `Participant ${participantId} can switch between topics.`
                           : 'Switch between study topics without taking over the canvas.'}
-                      </p>
+                      </p> */}
 
                       <form className="session-form" onSubmit={handleCreateSession}>
                         <input
@@ -1917,7 +1917,7 @@ ${suggestion.reason}`,
                       </div>
 
                       <p className="panel__copy sidebar-drawer__copy">
-                        Uploaded references stay here so the session list stays compact.
+                        Uploaded document appears here.
                       </p>
 
                       <div className="document-list">
@@ -2002,7 +2002,7 @@ ${suggestion.reason}`,
                   </div>
 
                   <div className="canvas-toolbar">
-                  {(['concept', 'note', 'example'] as StudyNodeKind[]).map((kind) => (
+                    {(['concept', 'note', 'example'] as StudyNodeKind[]).map((kind) => (
                       <button
                         key={kind}
                         className="action-button"
@@ -2080,7 +2080,7 @@ ${suggestion.reason}`,
                           gap={22}
                           variant={BackgroundVariant.Dots}
                         />
-                      <Controls showInteractive={false} />
+                        <Controls showInteractive={false} />
                       </ReactFlow>
                     </CanvasModeContext>
                   </div>
