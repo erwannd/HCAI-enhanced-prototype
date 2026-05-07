@@ -6,6 +6,7 @@ import type {
   CanvasState,
   CanvasSuggestion,
   ChatMessage,
+  ExplanationMode,
   RetrievedDocument,
   StudyNodeKind,
   StudySession,
@@ -59,6 +60,7 @@ type ApiInteraction = {
   _id: string
   userInput: string
   botResponse: string
+  responseMode?: ExplanationMode | null
   timestamp?: string
   createdAt?: string
   retrievedDocuments?: RetrievedDocument[]
@@ -93,6 +95,7 @@ type DocumentsResponse = {
 type ChatResponse = {
   interaction?: ApiInteraction
   botResponse: string
+  responseMode?: ExplanationMode
   followUpQuestions?: string[]
   retrievedDocuments?: RetrievedDocument[]
 }
@@ -185,6 +188,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function formatMessageTime(timestamp?: string) {
   const date = timestamp ? new Date(timestamp) : new Date()
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function normalizeExplanationMode(value: string | null | undefined): ExplanationMode {
+  return value === 'quick' || value === 'deep_dive' || value === 'example' ? value : 'standard'
 }
 
 function normalizeStudyNodeKind(value: string): StudyNodeKind {
@@ -458,6 +465,7 @@ export function mapApiInteractionsToChatHistory(interactions: ApiInteraction[]):
         role: 'assistant' as const,
         content: interaction.botResponse,
         createdAt: formatMessageTime(timestamp),
+        responseMode: normalizeExplanationMode(interaction.responseMode),
         retrievedDocuments: interaction.retrievedDocuments ?? [],
         areRetrievedDocumentsExpanded: false,
       },
@@ -543,10 +551,14 @@ export async function uploadDocument(sessionID: string, file: File) {
   return (await response.json()) as { document: ApiDocument }
 }
 
-export async function sendChatMessage(sessionID: string, input: string) {
+export async function sendChatMessage(
+  sessionID: string,
+  input: string,
+  responseMode: ExplanationMode,
+) {
   return request<ChatResponse>(`/sessions/${sessionID}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ input }),
+    body: JSON.stringify({ input, responseMode }),
   })
 }
 

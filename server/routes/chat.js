@@ -23,6 +23,7 @@ router.post(
 
     const result = await chatService.createChatTurn(session, userInput, {
       retrievalMethod: req.body.retrievalMethod || 'semantic',
+      responseMode: req.body.responseMode || 'standard',
     });
 
     res.json(result);

@@ -4,6 +4,7 @@ import type { Edge, Node, XYPosition } from 'reactflow'
 export type StudyNodeKind = 'concept' | 'note' | 'example'
 export type CanvasMode = 'view' | 'edit'
 export type SystemId = 'baseline' | 'enhanced'
+export type ExplanationMode = 'quick' | 'standard' | 'deep_dive' | 'example'
 
 export type CanvasNodeData = {
   kind: StudyNodeKind
@@ -28,6 +29,7 @@ export type ChatMessage = {
   content: string
   createdAt: string
   kind?: 'default' | 'status' | 'suggestion'
+  responseMode?: ExplanationMode
   suggestionId?: string
   suggestionState?: 'pending' | 'accepted' | 'dismissed'
   retrievedDocuments?: RetrievedDocument[]

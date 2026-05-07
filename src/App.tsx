@@ -45,6 +45,7 @@ import type {
   CanvasMode,
   CanvasOperation,
   ChatMessage,
+  ExplanationMode,
   RetrievedDocument,
   StudyCanvasEdge,
   StudyCanvasNode,
@@ -56,6 +57,7 @@ const PARTICIPANT_STORAGE_KEY = 'hcai-enhanced-prototype-participant-id'
 const ACTIVE_SESSION_STORAGE_KEY = 'hcai-enhanced-prototype-active-session-id'
 const ASSISTANT_DISPLAY_MODE_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-display-mode'
 const ASSISTANT_SIDEBAR_WIDTH_STORAGE_KEY = 'hcai-enhanced-prototype-assistant-sidebar-width'
+const EXPLANATION_MODE_STORAGE_KEY = 'hcai-enhanced-prototype-explanation-mode'
 const MIN_ASSISTANT_SIDEBAR_WIDTH = 360
 const MAX_ASSISTANT_SIDEBAR_WIDTH = 760
 
@@ -327,6 +329,52 @@ function buildFrontendSession(session: Omit<StudySession, 'pendingSuggestions'>)
   }
 }
 
+function normalizeExplanationMode(value: string | null): ExplanationMode {
+  return value === 'quick' || value === 'deep_dive' || value === 'example' ? value : 'standard'
+}
+
+function getStoredExplanationMode(): ExplanationMode {
+  if (typeof window === 'undefined') {
+    return 'standard'
+  }
+
+  return normalizeExplanationMode(window.localStorage.getItem(EXPLANATION_MODE_STORAGE_KEY))
+}
+
+function storeExplanationMode(mode: ExplanationMode) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(EXPLANATION_MODE_STORAGE_KEY, mode)
+}
+
+function getExplanationModeLabel(mode: ExplanationMode) {
+  switch (mode) {
+    case 'quick':
+      return 'Quick Answer'
+    case 'deep_dive':
+      return 'Deep Dive'
+    case 'example':
+      return 'Show Example'
+    default:
+      return 'Standard'
+  }
+}
+
+function getExplanationModeNote(mode: ExplanationMode) {
+  switch (mode) {
+    case 'quick':
+      return 'Short and digestible explanation.'
+    case 'deep_dive':
+      return 'May include additional background beyond the uploaded materials when helpful.'
+    case 'example':
+      return 'Uses a concrete example or analogy to explain the concept.'
+    default:
+      return 'Balanced explanation grounded in the uploaded materials and canvas.'
+  }
+}
+
 function applyCanvasOperations(
   nodes: StudyCanvasNode[],
   edges: StudyCanvasEdge[],
@@ -396,6 +444,9 @@ function App() {
     getStoredAssistantSidebarWidth(),
   )
   const [isResizingAssistantSidebar, setIsResizingAssistantSidebar] = useState(false)
+  const [explanationMode, setExplanationMode] = useState<ExplanationMode>(() =>
+    getStoredExplanationMode(),
+  )
   const [inspectorModal, setInspectorModal] = useState<InspectorModalState | null>(null)
   const [canvasHoverHint, setCanvasHoverHint] = useState<CanvasHoverHint | null>(null)
   const [canvasModeHint, setCanvasModeHint] = useState<string | null>(null)
@@ -854,6 +905,11 @@ function App() {
     }
   }
 
+  function handleChangeExplanationMode(nextMode: ExplanationMode) {
+    setExplanationMode(nextMode)
+    storeExplanationMode(nextMode)
+  }
+
   function handleToggleMode(nextMode: CanvasMode) {
     if (!activeSessionId || !activeSession || activeSession.canvas.mode === nextMode) {
       return
@@ -1205,9 +1261,10 @@ function App() {
     const pendingAnswerMessage: ChatMessage = {
       id: answerMessageId,
       role: 'assistant',
-      content: 'Preparing answer…',
+      content: `Preparing ${getExplanationModeLabel(explanationMode).toLowerCase()}…`,
       createdAt: formatNow(),
       kind: 'status',
+      responseMode: explanationMode,
     }
 
     updateSession(session.id, (currentSession) => ({
@@ -1225,6 +1282,7 @@ function App() {
       messageLength: trimmedQuestion.length,
       usedAskMap: withCanvasPlan,
       source,
+      responseMode: explanationMode,
     })
 
     try {
@@ -1232,11 +1290,12 @@ function App() {
         await persistCanvasForSession(session.id, session.canvas, 'user')
       }
 
-      const response = await sendChatMessage(session.id, trimmedQuestion)
+      const response = await sendChatMessage(session.id, trimmedQuestion, explanationMode)
       updateChatMessage(session.id, answerMessageId, (message) => ({
         ...message,
         content: response.botResponse,
         kind: 'default',
+        responseMode: response.responseMode ?? explanationMode,
         retrievedDocuments: response.retrievedDocuments ?? [],
         areRetrievedDocumentsExpanded: false,
       }))
@@ -1580,7 +1639,9 @@ ${suggestion.reason}`,
           {activeSession.chatHistory.map((message) => (
             <article
               className={`message message--${message.role} ${message.kind ? `message--${message.kind}` : ''
-                }`}
+                } ${message.role === 'assistant' && message.responseMode && message.kind === 'default'
+                  ? `message--mode-${message.responseMode}`
+                  : ''}`}
               key={message.id}
             >
               <div className="message__meta">
@@ -1593,6 +1654,11 @@ ${suggestion.reason}`,
                 </strong>
                 <span>{message.createdAt}</span>
               </div>
+              {message.role === 'assistant' && message.responseMode && message.kind === 'default' ? (
+                <div className="message__mode">
+                  <span className="message__mode-badge">{getExplanationModeLabel(message.responseMode)}</span>
+                </div>
+              ) : null}
               <MessageContent content={message.content} />
               {message.role === 'assistant' && message.retrievedDocuments?.length ? (
                 <div className="message__retrieval">
@@ -1689,6 +1755,20 @@ ${suggestion.reason}`,
           placeholder="Ask about the current topic or request a suggested map update."
           rows={4}
         />
+        <div className="explanation-mode-picker" role="group" aria-label="Explanation mode">
+          {(['quick', 'standard', 'deep_dive', 'example'] as ExplanationMode[]).map((mode) => (
+            <button
+              key={mode}
+              aria-pressed={explanationMode === mode}
+              className={`explanation-mode-picker__option ${explanationMode === mode ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => handleChangeExplanationMode(mode)}
+            >
+              {getExplanationModeLabel(mode)}
+            </button>
+          ))}
+        </div>
+        <p className="composer__mode-note">{getExplanationModeNote(explanationMode)}</p>
         <div className="composer__actions">
           <button
             aria-pressed={isAskAndMapEnabled}

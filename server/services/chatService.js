@@ -119,6 +119,29 @@ const CanvasSuggestionResponseSchema = z.object({
   suggestions: z.array(CanvasSuggestionSchema).max(2),
 }).strict();
 
+const RESPONSE_MODE_DETAILS = {
+  quick: {
+    maxTokens: 140,
+    instruction:
+      'Response mode is Quick Answer. Respond in 2 to 4 sentences, prioritizing the main takeaway and omitting extra detail.',
+  },
+  standard: {
+    maxTokens: 300,
+    instruction:
+      'Response mode is Standard. Give a balanced explanation with enough detail to answer clearly without becoming overly dense.',
+  },
+  deep_dive: {
+    maxTokens: 520,
+    instruction:
+      'Response mode is Deep Dive. Give a fuller explanation with mechanisms, distinctions, and related ideas when helpful. You may add careful background knowledge beyond the retrieved materials, but keep it clearly consistent with them and avoid unsupported claims.',
+  },
+  example: {
+    maxTokens: 260,
+    instruction:
+      'Response mode is Show Example. Explain the concept through a beginner-friendly example, analogy, or worked illustration while staying accurate.',
+  },
+};
+
 const SUGGESTION_STOP_WORDS = new Set([
   'a',
   'an',
@@ -336,6 +359,12 @@ class ChatService {
     return interactions.reverse();
   }
 
+  normalizeResponseMode(value) {
+    return ['quick', 'standard', 'deep_dive', 'example'].includes(String(value))
+      ? String(value)
+      : 'standard';
+  }
+
   async getCurrentCanvasContext(sessionID) {
     const canvasState = await CanvasState.findOne({ sessionID }).lean();
 
@@ -404,7 +433,9 @@ class ChatService {
     };
   }
 
-  buildAnswerMessages({ historyMessages, canvasContext, evidenceText, userInput }) {
+  buildAnswerMessages({ historyMessages, canvasContext, evidenceText, userInput, responseMode }) {
+    const normalizedResponseMode = this.normalizeResponseMode(responseMode);
+
     return [
       {
         role: 'system',
@@ -413,6 +444,7 @@ class ChatService {
           'Use the current session context only.',
           'Prefer grounded answers using the retrieved evidence and the learner canvas.',
           'If the evidence is weak or missing, say so clearly instead of inventing facts.',
+          RESPONSE_MODE_DETAILS[normalizedResponseMode].instruction,
         ].join(' '),
       },
       ...historyMessages,
@@ -560,6 +592,7 @@ class ChatService {
 
   async createChatTurn(session, userInput, options = {}) {
     const retrievalMethod = options.retrievalMethod || 'semantic';
+    const responseMode = this.normalizeResponseMode(options.responseMode || 'standard');
     const {
       historyMessages,
       historyTranscript,
@@ -574,13 +607,14 @@ class ChatService {
       canvasContext,
       evidenceText,
       userInput,
+      responseMode,
     });
 
     const client = this.getClient();
     const completion = await client.chat.completions.create({
       model: this.model,
       messages,
-      max_tokens: 300,
+      max_tokens: RESPONSE_MODE_DETAILS[responseMode].maxTokens,
     });
 
     const botResponse = completion.choices[0]?.message?.content?.trim() || '';
@@ -610,6 +644,7 @@ class ChatService {
       sessionID: session.sessionID,
       userInput,
       botResponse,
+      responseMode,
       retrievalMethod,
       retrievedDocuments,
       confidenceMetrics,
@@ -625,6 +660,7 @@ class ChatService {
     return {
       interaction,
       botResponse,
+      responseMode,
       followUpQuestions,
       retrievedDocuments,
       confidenceMetrics,

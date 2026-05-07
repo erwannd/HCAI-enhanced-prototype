@@ -88,6 +88,12 @@ const InteractionSchema = new Schema(
       required: true,
     },
 
+    responseMode: {
+      type: String,
+      enum: ['quick', 'standard', 'deep_dive', 'example'],
+      default: 'standard',
+    },
+
     retrievalMethod: {
       type: String,
       default: null,
