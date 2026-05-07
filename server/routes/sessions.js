@@ -87,6 +87,34 @@ router.get(
   }),
 );
 
+router.patch(
+  '/:sessionID',
+  asyncHandler(async (req, res) => {
+    const title = String(req.body.title || '').trim();
+
+    if (!title) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const session = await StudySession.findOneAndUpdate(
+      { sessionID: req.params.sessionID },
+      {
+        title,
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    ).lean();
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({ session });
+  }),
+);
+
 router.get(
   '/:sessionID/interactions',
   asyncHandler(async (req, res) => {

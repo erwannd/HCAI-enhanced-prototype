@@ -35,6 +35,7 @@ import {
   mapApiSuggestionsToCanvasSuggestions,
   saveCanvasState,
   sendChatMessage,
+  updateBackendSessionTitle,
   uploadDocument,
 } from './api'
 import { CanvasNodeCard } from './components/CanvasNode'
@@ -453,6 +454,9 @@ function App() {
   const [isAskAndMapEnabled, setIsAskAndMapEnabled] = useState(false)
   const [isAppLoading, setIsAppLoading] = useState(true)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [isEditingSessionTitle, setIsEditingSessionTitle] = useState(false)
+  const [sessionTitleDraft, setSessionTitleDraft] = useState('')
+  const [isSavingSessionTitle, setIsSavingSessionTitle] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [isUploadingDocuments, setIsUploadingDocuments] = useState(false)
   const [appError, setAppError] = useState<string | null>(null)
@@ -462,6 +466,7 @@ function App() {
   const assistantResizeStartXRef = useRef(0)
   const assistantResizeStartWidthRef = useRef(assistantSidebarWidth)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const sessionTitleInputRef = useRef<HTMLInputElement | null>(null)
   const canvasHoverHintTimeoutRef = useRef<number | null>(null)
   const canvasModeHintTimeoutRef = useRef<number | null>(null)
   const [, startTransition] = useTransition()
@@ -484,6 +489,27 @@ function App() {
       ? activeSession?.canvas.edges.find((edge) => edge.id === inspectorModal.id) ?? null
       : null
   const hasSelection = Boolean(selectedNode || selectedEdge)
+
+  useEffect(() => {
+    if (!activeSession) {
+      setIsEditingSessionTitle(false)
+      setSessionTitleDraft('')
+      return
+    }
+
+    if (!isEditingSessionTitle) {
+      setSessionTitleDraft(activeSession.title)
+    }
+  }, [activeSession, isEditingSessionTitle])
+
+  useEffect(() => {
+    if (!isEditingSessionTitle) {
+      return
+    }
+
+    sessionTitleInputRef.current?.focus()
+    sessionTitleInputRef.current?.select()
+  }, [isEditingSessionTitle])
 
   useEffect(() => {
     let isCancelled = false
@@ -785,6 +811,7 @@ function App() {
 
     startTransition(() => {
       setActiveSessionId(sessionId)
+      setIsEditingSessionTitle(false)
       setSelectedNodeId(null)
       setSelectedEdgeId(null)
       storeActiveSessionId(sessionId)
@@ -832,6 +859,63 @@ function App() {
       setAppError(`Could not create the session: ${normalizeErrorMessage(error)}`)
     } finally {
       setIsCreatingSession(false)
+    }
+  }
+
+  function handleStartEditingSessionTitle() {
+    if (!activeSession || isSendingMessage || isSavingSessionTitle) {
+      return
+    }
+
+    setSessionTitleDraft(activeSession.title)
+    setIsEditingSessionTitle(true)
+  }
+
+  function handleCancelEditingSessionTitle() {
+    setIsEditingSessionTitle(false)
+    setSessionTitleDraft(activeSession?.title ?? '')
+  }
+
+  async function handleCommitSessionTitle() {
+    if (!activeSession || isSavingSessionTitle) {
+      return
+    }
+
+    const nextTitle = sessionTitleDraft.trim()
+
+    if (!nextTitle) {
+      setSessionTitleDraft(activeSession.title)
+      setIsEditingSessionTitle(false)
+      return
+    }
+
+    if (nextTitle === activeSession.title) {
+      setIsEditingSessionTitle(false)
+      return
+    }
+
+    setIsSavingSessionTitle(true)
+    setAppError(null)
+
+    try {
+      const updatedSession = await updateBackendSessionTitle(activeSession.id, nextTitle)
+
+      updateSession(activeSession.id, (session) => ({
+        ...session,
+        title: updatedSession.title,
+      }))
+
+      queueStudyEvent(activeSession.id, 'session_renamed', 'session-title', {
+        previousTitle: activeSession.title,
+        nextTitle: updatedSession.title,
+      })
+
+      setIsEditingSessionTitle(false)
+    } catch (error) {
+      setAppError(`Could not rename the session: ${normalizeErrorMessage(error)}`)
+      setSessionTitleDraft(activeSession.title)
+    } finally {
+      setIsSavingSessionTitle(false)
     }
   }
 
@@ -1978,7 +2062,36 @@ ${suggestion.reason}`,
                   <div className="canvas-header">
                     <div>
                       <p className="eyebrow">Learning Canvas</p>
-                      <h2>{activeSession.title}</h2>
+                      {isEditingSessionTitle ? (
+                        <input
+                          ref={sessionTitleInputRef}
+                          className="canvas-title-input"
+                          value={sessionTitleDraft}
+                          onChange={(event) => setSessionTitleDraft(event.target.value)}
+                          onBlur={() => void handleCommitSessionTitle()}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void handleCommitSessionTitle()
+                            }
+
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              handleCancelEditingSessionTitle()
+                            }
+                          }}
+                          disabled={isSavingSessionTitle}
+                          aria-label="Edit session title"
+                        />
+                      ) : (
+                        <h2
+                          className="canvas-title"
+                          title="Double-click to rename"
+                          onDoubleClick={handleStartEditingSessionTitle}
+                        >
+                          {activeSession.title}
+                        </h2>
+                      )}
                     </div>
 
                     <div className="canvas-header__actions">

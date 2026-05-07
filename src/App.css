@@ -211,6 +211,9 @@
 }
 
 .workspace-rail {
+  position: relative;
+  z-index: 20;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -300,7 +303,7 @@
   transition:
     opacity 140ms ease,
     transform 140ms ease;
-  z-index: 10;
+  z-index: 80;
 }
 
 .workspace-rail:not(.is-open) .rail-button:hover::after,
@@ -484,6 +487,32 @@
   gap: 16px;
   align-items: center;
   margin-bottom: 14px;
+}
+
+.canvas-title {
+  margin: 0;
+  cursor: text;
+}
+
+.canvas-title-input {
+  width: min(100%, 520px);
+  margin: 0;
+  border: 1px solid rgba(20, 73, 76, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 252, 244, 0.92);
+  color: var(--ink);
+  font: inherit;
+  font-size: clamp(2.1rem, 5vw, 3.1rem);
+  font-weight: 600;
+  line-height: 1.05;
+  padding: 8px 14px;
+  box-sizing: border-box;
+}
+
+.canvas-title-input:focus {
+  outline: none;
+  border-color: rgba(20, 73, 76, 0.55);
+  box-shadow: 0 0 0 4px rgba(20, 73, 76, 0.12);
 }
 
 .canvas-header__actions {

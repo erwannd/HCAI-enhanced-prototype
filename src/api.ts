@@ -489,6 +489,15 @@ export async function createBackendSession(participantID: string, title: string)
   return response.session
 }
 
+export async function updateBackendSessionTitle(sessionID: string, title: string) {
+  const response = await request<SessionResponse>(`/sessions/${sessionID}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+
+  return response.session
+}
+
 export async function fetchCanvas(sessionID: string) {
   const response = await request<CanvasResponse>(`/sessions/${sessionID}/canvas`)
   return response.canvas
